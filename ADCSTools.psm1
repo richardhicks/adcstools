@@ -16,9 +16,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.2
+    Version:        1.3
     Creation Date:  June 27, 2023
-    Last Updated:   February 29, 2024
+    Last Updated:   March 20, 2024
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -32,7 +32,7 @@ Param (
 
 )
 
-# // Dot source nested script files
+# Dot source nested script files
 Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
 
     . $_.FullName
@@ -42,8 +42,8 @@ Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
 # SIG # Begin signature block
 # MIInGwYJKoZIhvcNAQcCoIInDDCCJwgCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUdZdsJ2SZpRCvmBFbAImtzPZ3
-# /iyggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUBfsG+SGkgPu1q+f8t+CxjozA
+# vmKggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
 # AQwFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQsw
@@ -223,30 +223,30 @@ Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
 # NiBTSEEzODQgMjAyMSBDQTECEAFmchIElUK4sup54tMHrEQwCQYFKw4DAhoFAKB4
 # MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
 # gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkE
-# MRYEFJnLRWavMr/utKaaPzFywywte8V/MA0GCSqGSIb3DQEBAQUABIIBgHXNEWOi
-# ZWzaFurjm7oMfRPWNhFP0ZlLjWprF2jhiOpFezsbGqqM86xI+PJQmZ52d3LkIIOy
-# evGZtrPOI6XvOqp+RrBGPFqPsvgax1n+9iBFkq7EElUyXW2va3XYRcUkMOC/qYr2
-# 4BG//i9q3B+0KapRQ+oaKhnewfolJRbGj+20HuVMqILVeOnTREMDbHix69IXKcez
-# oVkXjadE30RGnpiOSuJ8Uqk7MnOlzP2luELqv8tSfZyrWMmJ5HMYSfpf8tobO21J
-# K1DSMAvcwco39rW1EGgXwHovEnz/8nfH2XviV2KgE7+lHyr8QIgyh7Afz8oYO2Vc
-# /GXmnj601pXV5UEJJchRGmmpAagtt8pK+mY8N5j+M1DHJZvmqQeuvAkwwNZVeqgy
-# sBlDKvAs5xQ2NSBDSrk0kJC42jxvhWtx0Kt/mcK1dTCjUYPLP2DAZdLD9QKbriA9
-# YH3ugRYC/n98wUSVKQiC7pASz70h4mzDhKZ4RKPKO9jvdaWQAj/UyuUZlaGCAyAw
+# MRYEFK3hdBAAAJV3NS65sDuXz4I4oQD8MA0GCSqGSIb3DQEBAQUABIIBgCHSUozN
+# uluLcXxOqtPPPPJq2k63TogO6uSmYxDJSH4k3YotPhD1v+yjq77twkomT1gNsZ9R
+# e8dlm/jT9G6lq7cMWkZZqLm4i+OlnR9t1Tjbkbynm0RFptULvPWI/wJ8sJ1yjMPO
+# SqN8zEB3vVXyfXEMfoGoAIA5bTscs0Wx2P62uSQ7nHR5bU7Q5VJ10/+woxUsV3l3
+# sjyl7ZaFbekgcPreYUNA6dMDZVR3ezLHqaLfvOXBQfA3wW7eqCoSawcOpe2PiRtG
+# uYs4jb+SPhORfcwD2f9XUxgV+qw6HKUsqluUjO1k1taUhgVo0bSoGQxW9/vv5PEo
+# plMcnN3GAQ4vPTVC+ClzCJ/TM4itxRMflrTWYLQz9IxdjXVMgHPP/a+iG0lCgHZB
+# aVCN4E289IM6e6kmiV3UAtXQNYTyVLmyfTkdsqYgoXcV6beKyFIH9TKh3eUnm/MI
+# oe4m+b/HgQ36NwbdqX5tjQzDI5/4ZD25fCFEYONBaExR62rNwFV42bl09KGCAyAw
 # ggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcwFQYD
 # VQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3RlZCBH
 # NCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAVEr/OUnQg5pr/bP1/l
 # YRYwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNDAzMDEwMTUwNTNaMC8GCSqGSIb3DQEJBDEiBCCPlwmB
-# YEt8gmQg/moj4V1riIE7CxIWWjxNUEj/BR5dQTANBgkqhkiG9w0BAQEFAASCAgB3
-# EIZmRQ9g5HSiFyzin4NLX86fAx1v5mvwgSY7T06H9Zbv9F3uNEKXRxD1cnCrBz91
-# tfq4hOsbvmO2YQVPJJpHTVkIAM65KKgQyaxvH5vau/LjWyJgzgjisU5EoGpk2jx+
-# CiNOPq8gq7tO8rNTHPGn0IBiDTBTCTD4lyPrDHbujEU4OFJ6CP1GR4M2BexRVg+K
-# jOnHAHRhdknd5vNBfLuIUe/+0XI2VDHj+BjcupJta8/gplPuqYDoIlJehE4P81Hm
-# yQ1UZ5sklkgwobwHXB2NoLq5teshEHC4quxU+isWKPY++8mfrzhIKHbwX3oD4xpw
-# PJUl+/f1F1HVfag51G4snceRXSY0KrGIHR052Q7JY5z2i0iONcQAnueSdq9CG2gh
-# MTjf0pjTiv+Y/WWyueiIST0wD9zV0mcEwuOCLgb/HQT9uJg6tpUvnhRUc5Okhg0d
-# syCv72IBj1MVa6RYyNm+mzCoBiguShSOcYOFiYkEsoc3jHzpOnIGN/23IH/ea2xu
-# yz6oFucHXhH9KUAl6qdzoFzw0LJGy0TFKB6LqWNsfwl6sno+Po3n7ZgaFwyrwsvc
-# ZA77zHzSHICroshB5NB21+LZ2xRbvbC0nniHHXYtbcCBixjnRKertiNgwdvszNTZ
-# FQahIyGi3wTnQkoWpVQesLTrSTQbVf63Ke7ELZ5FqQ==
+# CSqGSIb3DQEJBTEPFw0yNDAzMjAyMzEzMjZaMC8GCSqGSIb3DQEJBDEiBCBBiqly
+# ZOTf3Ei1I++mS+G8G4IK2Zx6IYOp1c4UJgl9cTANBgkqhkiG9w0BAQEFAASCAgBc
+# O+aGgxQ60fQqKQl0B1oH6Co9ThebcQXeknyFgkEaZH/w2UDk1EkpCXYv3Hlfr5C4
+# P8gZKO0yjUs+lamIUCQE4vNHNbqm3u5NQznuiI2DiPq1kuVJUCRig7AAH7f8Ba8K
+# 6wIo4UgWZOovV0VOhXMkkXDbtgnJlp+X0sbNCCpE2rdi4zIO0GCH9fWkoarhnTxs
+# q76IAjSlNLbjZUcmbzr0KlDBxk7A4v2i8ZTpJ6INZjCLFewxTCfwRtJq0mAQpClf
+# 5ElJ5VWSQuMo2xI5GHC3vGzVv75iu6GhY9J6pzxOlVwool5jdAwdKnvSiAnGIT9A
+# TCm8x4MpHVXekutYS9PobCpv33eDaA2vWguRQ8Xzmsrlbp/A2THrPfjQymwA2wMD
+# nWugRU4s/xluBi7Qwsw3tu2qUHpwsC3l+3Ffn8vK6lZPpvZXk6aU9nbxhEuP5Exd
+# JoQ4WSA1ciy8DZqYF9oFyMaVEKYNktTx4lbUIsTkDZ5kQ7CbIHcQS0k0KcykOmqE
+# kyxEmsOveqOsIZDcpktNXspt5Jm+Zfgu27Gm/MnDITDKRSVkiZEFlNalZsZm8d4B
+# 5SxawvVGELVU7nI4zS00BXVyaddMvLQZcqEhM6Vlyj6VqrLkkY865dsjbmq8AmZK
+# V2MTDkz1hY9MhWukl3RgpJOFLyhr4OSwn0jb4BtOCw==
 # SIG # End signature block
