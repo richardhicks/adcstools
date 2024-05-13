@@ -1,77 +1,98 @@
 <#
 
 .SYNOPSIS
-    Retrieve all certificate templates from Active Directory and display their names and OIDs.
+    Search for certificates in the local computer or current user certificate store that were issued using a specific certificate template.
+
+.PARAMETER Template
+    The name of the certificate template to search for.
+
+.PARAMETER User
+    Indicates that the search should be performed in the current user certificate store. By default, the search is performed in the local computer certificate store.
 
 .EXAMPLE
-    Get-AdCertificateTemplate
+    Find-CertificateByTemplate -Template 'WebServer'
 
-    This command retrieves all certificate templates from Active Directory and displays their names and OIDs.
+    This command searches the local computer certificate store for certificates that were issued using the 'WebServer' certificate template.
+
+.EXAMPLE
+    Find-CertificateByTemplate -Template 'User Authentication' -User
+
+    This command searches the current user certificate store for certificates that were issued using the 'User Authentication' certificate template.
 
 .DESCRIPTION
-    This function retrieves all certificate templates from Active Directory and displays their names and OIDs, which can be helpful for troubleshooting certificate enrollment issues. The function uses the Get-ADObject cmdlet to retrieve all objects from the Certificate Templates container in the Configuration partition of Active Directory. It then loops through each object and creates a custom object for each template, storing the template name and OID. The custom objects are then sorted alphabetically by template name and output to the console.
+    This script searches the local computer or current user certificate store for certificates that were issued using a specific certificate template. The script enumerates all certificates in the specified certificate store and extracts the certificate template information from each matching certificate.
 
 .LINK
-    https://github.com/richardhicks/adcstools/blob/main/Functions/Get-AdCertificateTemplate.ps1
+    https://github.com/richardhicks/adcstools/functions/Find-CertificateByTemplate.ps1
 
 .NOTES
     Version:        1.0.1
-    Creation Date:  February 29, 2024
-    Last Updated:   May 7, 2024
+    Creation Date:  March 29, 2024
+    Last Updated:   March 29, 2024
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
     Website:        https://www.richardhicks.com/
 
 #>
-Function Get-AdCertificateTemplate {
+
+Function Find-CertificateByTemplate {
 
     [CmdletBinding()]
 
     Param (
 
+        [Parameter(Mandatory, HelpMessage = 'Enter the name of the certificate template or a keyword to search for.')]
+        [ValidateNotNullOrEmpty()]
+        # Ensure string does not contain a wild card
+        [ValidatePattern('^[^*?]+$')]
+        [string]$Template,
+        [switch]$User
+
     )
 
-    # Specify the distinguished name of the Certificate Templates container
-    $PkiContainerDN = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$((Get-ADRootDSE).ConfigurationNamingContext)"
-    Write-Verbose "Container path is: $PkiContainerDN."
+    If ($User) {
 
-    # Retrieve all objects from the Certificate Templates container
-    $TemplateObjects = Get-ADObject -SearchBase $PkiContainerDN -Filter * -Properties msPKI-Cert-Template-OID, Name, DisplayName
-
-    # Create an array to store the objects
-    $Templates = @()
-
-    # Loop through each template object and create custom objects
-    ForEach ($TemplateObject in $TemplateObjects) {
-
-        # Create a custom object for each template
-        $TemplateInfo = [PSCustomObject]@{
-
-            TemplateName = $TemplateObject.Name
-            TemplateDisplayName = $TemplateObject.DisplayName
-            TemplateOID  = $TemplateObject.'msPKI-Cert-Template-OID'
-
-        }
-
-        # Add the custom object to the array
-        $Templates += $TemplateInfo
+        Write-Verbose 'Enumerating certificates from the current user certificate store...'
+        $Certificates = Get-ChildItem -Path Cert:\CurrentUser\My
 
     }
 
-    # Sort the array of custom objects by TemplateName alphabetically
-    $Templates = $Templates | Sort-Object TemplateName
+    Else {
 
-    # Output the sorted array of custom objects
-    Return $Templates
+        Write-Verbose 'Enumerating certificates from the local computer certificate store...'
+        $Certificates = Get-ChildItem -Path Cert:\LocalMachine\My
+
+    }
+
+    $Certificates | ForEach-Object {
+
+        $Certificate = $_
+        $TemplateInfo = $Certificate.Extensions | Where-Object { $_.Oid.FriendlyName -eq "Certificate Template Information" } | ForEach-Object { $_.Format(0) }
+
+        # Check if the template information matches the desired template name
+        If ($TemplateInfo -match $Template) {
+
+            [PSCustomObject]@{
+
+                Subject             = $Certificate.Subject
+                Issuer              = $Certificate.Issuer -Replace '(CN=[^,]+).*$', '$1'
+                Thumbprint          = $Certificate.Thumbprint
+                TemplateInformation = $TemplateInfo -Replace '^Template=', ''
+
+            }
+
+        }
+
+    } | Format-List
 
 }
 
 # SIG # Begin signature block
 # MIInGwYJKoZIhvcNAQcCoIInDDCCJwgCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU527lpq+jUgV8mRYBLo/WMDq3
-# HzyggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU1al8nhK124RjtlP93XzhOcu4
+# wyKggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
 # AQwFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQsw
@@ -251,30 +272,30 @@ Function Get-AdCertificateTemplate {
 # NiBTSEEzODQgMjAyMSBDQTECEAFmchIElUK4sup54tMHrEQwCQYFKw4DAhoFAKB4
 # MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
 # gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkE
-# MRYEFNH1ZKBwiMI3+uR8GeNPQKeEzm/nMA0GCSqGSIb3DQEBAQUABIIBgJfBya6X
-# MokhrA/gV5NHKT6cKyOhRmYYtmNO79Rbo4+EYlx79sfAj1Ecjve5SMQT1s23R0SU
-# SBqgLUpDIwaA9yU5pABk6dOZNu4ir1IigEMnv7Y7sq90QGPuMfVWPNw3Pr4slJHj
-# pM0/thgtuki6hdj5Rbugu0AbPcyYG/AANrd1c8c4MRCEzyCFRRPc56WTFa04C8Lj
-# M0c6pSFDv7AG+ZrjmkUEPq4SulZuSDpB8UTk3aY+VudGhUifzjUhBZCC+i3A3jdT
-# gFcGzs/SdmNZLXurLsRIbtrchntuvJKgztD7D3iI7FcnjjYviUmEAQnQCjrfaiT5
-# f7rdCc6E7cKjG2jLQ+fdG7Z3EdGsXqxp1+kUtmlK0f5MRcr5BJbdQlHxB1Wbd/PY
-# sFteCShUu7XZIwB2ywYXPDAIoDRq24sKsOWcOw/BdXN3tg0196W+pLO+j9a1uiVC
-# P/u18LVA0OriNXWFzm9cZRrwx/cEhTAqOPi+eqeAs4XmeeaXILrsaGL1Q6GCAyAw
+# MRYEFCPzDN3zOcixvTvlwaSD1O8swL5YMA0GCSqGSIb3DQEBAQUABIIBgD4AL415
+# lonsLLlF5jJ0bvzl3jcCJL8zEEMS5ereliYaTnxTO3RoraEHGJEXMRRd4RZDIZfz
+# lGB71gfHxx+aL6PMy+is/rwzgJDH3SaCMh7OXNW0LmJdw7LaVC1QHgUIfm1+5K4h
+# rXag76Wu8UMY4Wg6PGnVn1e/pRcHOkuYLrll9ljHT1RAnPgkDGgqjJvjx5PgS9v6
+# g926dIMbmWubUMFGsv15fxeTt8K70o/4UVPgmyollicpph0fBsaoCVIDr4BDxnbb
+# JVRDWTKjQhVfBUXGbczcENNGFwODRzsRmzM6rQDrJtDM6301qgKiL9UrFGG8Epys
+# cRwNssJwVifwK+iRUF+HKy66wTCOWIZXqKvvPrKsRLk+sZh2v9twMv1b2g9uvPnf
+# 5O1+j0CNYw/URAUTmZJrP9Ko1hla5udwogmkra0uYUPhgwwLtCRqp6dFatO9YciD
+# NmRzvfamwRs46uIp+OnJoTeeRJvwDbmTfv1L9k1AJxvHquxkQlqrmH6I36GCAyAw
 # ggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcwFQYD
 # VQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3RlZCBH
 # NCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAVEr/OUnQg5pr/bP1/l
 # YRYwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNDA1MDcxNjI2MzhaMC8GCSqGSIb3DQEJBDEiBCBnD6tn
-# gYvldV1nlwKrXWlNomxYektfyLr/3NcWN7YJ+jANBgkqhkiG9w0BAQEFAASCAgAr
-# qUIXnFe6bQczC2+VnQo4aHtv7ZuFRBGloK2+kQkQlwD0lD9ta258ZgX2nhQ8U1XT
-# TPgZ2GqCH0nFGDStOgsdVAKMHZ7O9a74whKw/5rNTb6qzrysrrXX+GXY520oCgtw
-# 5CvNdsUAb5KaS4zTPChvQcKqzPlChJEZ+11szICfqgI4rizy6ZcELoISauMk8bZr
-# PEPBPgWj+kxY0LqIguQKsHGQZoHzT4ipryQsyxr1yjqu25/PWP9fVSkc3gaGC/n9
-# W7nmbPFmqODb7ujJUScSf0eqUC9J+WCJ1/1wpBcDL7E/uTVHtL8dGXDu7m91PoRd
-# e5eIjcv9JUtkd/Q1EeXSyi52H3LYu2ZEdOsBlrEl5iXBAMuq8d6gP90gA7/1FLg7
-# pY7HJhv+FiSpPVIWoPTQK3DDc/p/NrtHSGvH+iSMqlSc723k4VrB0Y1X6QI/u/Yk
-# HHusGJBn9A73l/x3WWFM1q9uG9Z7wS0KQc0jVA/yewMe6ef+F3A3g4PjDCE8Pp9x
-# XPM/bZ8jLls4TMUJJx2PrTXAdMK2JuPvSHho67PqsEdVG2XYg5JIwyb4YmLQh9PM
-# f+8kc42Jz2vP7wRrxI+5bp7PRNZMHl8NYRqCx+h78e7GrHOVZRNH/VRrfP1hS52I
-# yJIsZBpw16qInjDw15F1akLEM6OvpAJ/o7N4cFtkzg==
+# CSqGSIb3DQEJBTEPFw0yNDAzMjkyMjI0MjVaMC8GCSqGSIb3DQEJBDEiBCADCZWc
+# oXftOxSXwT1/dzG9wdqKwj86ykl7HsFf2LVUnTANBgkqhkiG9w0BAQEFAASCAgAr
+# 5OZ1ajrYnFANLQSwOIMOuScsyWWfR2hyHv+LzMRnHtMI7m2zROMcujtJHaMelP4O
+# syhisr4YWTmJ3Vb0UfPGFutFmVTLW93lzkRtcMqD2RB2ny6U3quiL/B8Z3acGBSV
+# 5Vh+PcpGt3XfMTQ87LDbz7KEzEEFOXgejeGRK3sSkaZnj+Xs2cDZ2HgiGtUSH667
+# O0czdvoweBQtiIqAto2BlgPeetHTVoELkHrXRCaVt3ctO4aF1tSLv2vHJ92w2D7V
+# 8SvZybj6CkBCbs14BLGtjVjpzSwVwiMy9ld7rzVZnGvmkb2FfMHpHqXlGOB5vf9O
+# K9Qz4kBL+h5bGjlTS79CtZrJHJeUPCXyhE4gUvKBWhy0fa/tIW+vwNmSrybb2w/w
+# JtrxXBAlkOJaNMp8zohMTKrZxt723qBRYIFcJ982uqRjGm17sbU+OEn+UKQxre0k
+# Xyx0BDuAsIulqNho1OwRckeXmwodc9t8ge6ZHZjBvxT7vY7JKzWN6Qr98s5BIlGM
+# p+USDQ5ZfjUldmAsBjCv4gkcE6RZFZlM+DdZh8PHUcT1fPdgw5kvWJ5NMdkHydgh
+# Oe+N1pKs4xKucerLdD80cerW6ZZJ99RMeZI5+U/SgteVK3NkL83Yy+/ZhPN0PITk
+# U5/6Mf80+9ju0gQxKavt7dpgNCljYQtBCVkpbPgHGw==
 # SIG # End signature block
