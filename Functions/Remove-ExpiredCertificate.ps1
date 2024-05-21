@@ -54,9 +54,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:            1.2.1
+    Version:            1.3
     Creation Date:      January 18, 2020
-    Last Updated:       December 11, 2023
+    Last Updated:       May 21, 2024
     Special Note:       This script adapted from original published guidance by Andre Gibel
     Original Author:    Andre Gibel
     Original Script:    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
@@ -78,14 +78,22 @@ Function Remove-ExpiredCertificate {
         [String]$State,
         [ValidatePattern('^([0-9\.\s])+$')]
         [String]$Template,
-        [ValidatePattern('^\d\d[\./-]{1}\d\d[\./-]{1}\d\d\d\d$')]
-        [String]$Date = (Get-Date -Format MM/dd/yyyy),
+        [ValidatePattern('^(0?[1-9]|1[0-2])/(0?[1-9]|[12][0-9]|3[01])/([0-9]{4})$')]
+        [String]$Date = (Get-Date -Format M/d/yyyy),
         [Switch]$Delete,
-        [String]$LogFilePath = 'C:\CAMaintenanceLogs',
+        [String]$LogFilePath = $env:temp,
         [Alias('Compress')]
         [Switch]$CompressDatabase
 
     )
+
+    # Ensure date input is no later than today when viewing or deleting Issued certificates
+    If ($State -eq 'Issued' -And (Get-Date $Date) -gt (Get-Date)) {
+
+        Write-Warning 'The date specified is in the future. Please specify a date no later than today when viewing or deleting Issued certificates.'
+        Return
+
+    }
 
     $Pathmid = ''
     $DateFilterField = ''
@@ -157,7 +165,7 @@ Function Remove-ExpiredCertificate {
 
     }
 
-    Write-Verbose "Log file path is $CertLogFilePath."
+    Write-Output "Log file path is $CertLogFilePath."
     Write-Verbose 'Executing the following command...'
 
     If ($PSBoundParameters['Template']) {
@@ -257,8 +265,8 @@ Function Remove-ExpiredCertificate {
 # SIG # Begin signature block
 # MIInGwYJKoZIhvcNAQcCoIInDDCCJwgCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUPRK/IB7T8rdPQf5/MI9wOwwc
-# RqeggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUdnNo1aDBu8iANsCEhYyOtjHe
+# aUaggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
 # AQwFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQsw
@@ -438,30 +446,30 @@ Function Remove-ExpiredCertificate {
 # NiBTSEEzODQgMjAyMSBDQTECEAFmchIElUK4sup54tMHrEQwCQYFKw4DAhoFAKB4
 # MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
 # gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkE
-# MRYEFGW//6Xs8xlM7+dJAzn5f/593E58MA0GCSqGSIb3DQEBAQUABIIBgL1sLBvq
-# gNxsU6MPk9q6PcT7QEfLNF9kdzGd+RofW38hWnjRge15MBT6e/iCfWccVcIEaSS2
-# Y0BB4F/Lt60hncHNCmj8NyEh05WpV3Sef1cW6wMxJ9+TrwBagyE2U6x0vXaQZdrw
-# +kf3queucw4G4qUGNaG4uAG+N9odOdBifqflZJ/gEWGxD2g67s4mpuhNkBZAHYV7
-# nqrvZM0aMIwv9R6K8Z8F4CO+uGbVRrUs5rXAwJ4J7Jp0zIvoikfDc7h+PqmwNKul
-# B7OdVZDZLqU1RH/wWtsqP/Slt1Ni78NqS1F298OjK7Mcx6MtMvubGns4sMtyc5W/
-# 8DoJ366ZdBp3tEIxeSxKX/vml+bCd+Pg995YxPM+jCR4MNkt03riInBd+GOFwGUE
-# 7owaryy+nWNLcEitr4xlevlnPorVf+ncce+HW8/GiL9xRiuFtjnO6xqCY3ilphs8
-# rJW9/AOzR1GfUrr2UUsALMyU1fMqFRvpKwAogFeBeeULRkFH5JfqtDVFuaGCAyAw
+# MRYEFK5Z9R5i6Nxaaw2juZRjmMm6ZIYhMA0GCSqGSIb3DQEBAQUABIIBgGDZgaYk
+# b6iJmdi0kn5tr2u522ARXU9zK2cUOOtXzhSlrxum4DBh61ugSN7ZJ3sd+0UNO04e
+# /P2TSdy26IlhtdZ2JJvBf12Dxeax4OTDkU6BBFZdJemp0UQYxMZc9ab3EKfAyxTA
+# gAhmjvp2m8ADLWEJ+hwD/SyaJKAbIhHG/w0vSpil3OmIgy3LNBXWlu/9s+zffHUH
+# a0sjz2Q+N1B0JCu0CJWB/bTMKjjXPSx3cHYgwfZmqsOWS4kCo/Xji+cHprSUFrKp
+# IUjGuI+yetyPc/2uzSmIF27cNRyrShinqvw4sqoje28CWc2C6ZLeTzZrQ1AGeILw
+# Kb+8r00BELyy//CyzIQKxGUfOPgVC2k+GET9X7GWOjrSzNsYk3PKo3sKqN/Zuffk
+# X160ZCn6ahN1F6i6tbku7T49QyGkdiWbI2JOO/IOYvTg5DZzKY2rQVHF6raifRqs
+# aL96R/NJj0dZOj8nzDvmdxhLG0+WB1099PLS3FTaaKWDkzT+dpqXLIvW3qGCAyAw
 # ggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcwFQYD
 # VQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3RlZCBH
 # NCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAVEr/OUnQg5pr/bP1/l
 # YRYwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNDAzMDEwMTMzMzdaMC8GCSqGSIb3DQEJBDEiBCBQB0vs
-# HYPdajDmLBTu/ygXm8HpLbDMZpQWacZEhohfJTANBgkqhkiG9w0BAQEFAASCAgBH
-# lZ89z8zimulgiChKagdXKYImsVxSt6YgwIOyO8PkMNtTdvYQf0qHSRWy7WN0zmWX
-# s3wIyU5J8mLduIpMiqndzzDhlHOZ1WNaq5xpBMNc/09EKCugFdBmuQXNH+j1U66b
-# Agxijop1m1oLJE4k4rEwV9E6iNHTlbw75YNeQMDF88oL0ZUn22hrL93QsWF8FcKV
-# mMaqApagzydg1k5/VC38TjOlG75PbTy/GI8vUwT3+ZWMJBtpddE8AQJW1mQ/AuQk
-# h0NGREhOK97VZe33qfZERxcENkR32X0URZ2AG0y3JKWPwGKCP6NzVOQG/+Xqubwu
-# pVJig4Wf+DHQBjMyql/83eDVaEJPBdRlU9YfSWaS0Od1YdgLWlwCbwKBVzrxtAYk
-# Rgc3K1pjWAYrAvmbC26gBB0Jv+s8GJR0zljAf8wugsnRxQz273QiL6K6IeZE3aan
-# Sd2b+RL/+yxHeTo1Ke2USe8DBNIbGMJ9+An8xu28OIFJ5Hivbi+a+4FHFqkaz2/P
-# 42Nzh30hwjnj33GjnG7nxKCQvzSDrZRrxw2v8zYQFsdfKAiTUCz2P4U46TvnnFUk
-# ZRxGFhE51XZbF4KlLXD0vvJNbX9KUwPxkm5qoUV6TGIkVG1wkGrpao2BvtnBxrAw
-# yOsAcTOo2HQU2k/vj84nzPjwN2xKtp+YiRmJFdRLZg==
+# CSqGSIb3DQEJBTEPFw0yNDA1MjEyMzM5NThaMC8GCSqGSIb3DQEJBDEiBCAVU4cv
+# jVhmz/J+ftmj7Rkoc8bouVTxNBUZoUMHMTq3XjANBgkqhkiG9w0BAQEFAASCAgBR
+# tzHme9+0yqQFoYMwdEDwoq1Evuy9M5EhUzt5oc4VbVdEM/ouFQ86FrgQebhqlCCF
+# QJoSYwkBDJ5qyGW6T6l4sL7Y451JNBRP6bIJAzq+rynebukRfkGEofo4LczqquXj
+# i7UPJri8E8AHTdYGi3KVXQLiNqhK9qZOSPxCrgLxL1VuFpPO5wvDK/lZJOxeJtCh
+# gf5XJHZVTPZb8EU8jzekAxy7E9AVyqFJMjiVh2qGSYYRzKpgFUAigKW/F8Jd+PIg
+# xdsMA9TGsckd8rAIgd/eZWYGwGDTp40RRBDtNVPK0ogXCla4G1owe47dFcatpQCo
+# qUPLHRTxRwg8k6daS9fepBzZJ2tnseJYGgrr9d/s+KpH0oZwNt3TiyLoV+x7vw2/
+# gd1niLoBwIp2luRglBibyIh46oC3mxC7t6JuDRx9x64yCosFEqzhFtCvgjZ22YYj
+# sqSFY9vOyahJNRW3iV5yckSb2Q0cHY3cq/qxMtcvJcX7SfN6kWrw6fZ10CY8GOUW
+# EQXyuBKbVN9LEVy2udTy9njiw4lOA/UT7Qno4Jx9M2QXspSJIKj0jUtQLKclzq6n
+# nYaIduZSOA9nuYWkxt7SBV26usSVhNAxsz10el0E1PvUTfFAk3nRkqp7MqP9nsKo
+# zdM0cfZl9IZWK7/Jji/vo83GrMD+Q1p8czXOkUsbqQ==
 # SIG # End signature block
