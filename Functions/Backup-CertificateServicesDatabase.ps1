@@ -9,10 +9,19 @@
 .PARAMETER RemotePath
     The remote file path to store the backup file archive.
 
+.PARAMETER IncludePrivateKey
+    Indicates that private keys should be included in the backup.
+
 .EXAMPLE
     Backup-CertificateServicesDatabase
 
     Running this PowerShell command will back up the local certificate services database and configuration files to the default location C:\CaBackup.
+
+.EXAMPLE
+
+    Backup-CertificateServicesDatabase -IncludePrivateKey
+
+    Running this PowerShell command will back up the local certificate services database and configuration files to the default location C:\CaBackup and include private keys in the backup.
 
 .EXAMPLE
     Backup-CertificateServicesDatabase -LocalPath 'C:\Temp\CaBackup' -RemotePath '\\fs1.corp.example.net\pki\backup\'
@@ -29,9 +38,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.4.1
+    Version:        1.2
     Creation Date:  January 20, 2020
-    Last Updated:   December 11, 2023
+    Last Updated:   August 11, 2024
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -46,9 +55,13 @@ Function Backup-CertificateServicesDatabase {
     Param (
 
         [string]$LocalPath = (Join-Path -Path $env:systemdrive -ChildPath 'CaBackup'),
-        [string]$RemotePath
+        [string]$RemotePath,
+        [switch]$IncludePrivateKey
 
     )
+
+    # Require elevated privileges
+    #Requires -RunAsAdministrator
 
     # Variables
     $Hostname = $env:computername
@@ -65,6 +78,26 @@ Function Backup-CertificateServicesDatabase {
     # Backup the CA database
     Write-Verbose "Backing up the CA database on $Hostname..."
     Backup-CARoleService -Path $LocalPath -DatabaseOnly
+
+    # Backup CA certificate(s) and private key(s)
+    If ($IncludePrivateKey) {
+
+        $Password = Read-Host -AsSecureString -Prompt 'Enter a password to protect the exported private key(s).'
+
+        Try {
+
+            Backup-CaRoleService -Path $LocalPath -Password $Password -KeyOnly
+
+        }
+
+        Catch {
+
+            Write-Warning $_.Exception.Message
+            Return
+
+        }
+
+    }
 
     # Export CA configuration registry entries
     Write-Verbose 'Exporting CA registry entries...'
@@ -133,8 +166,8 @@ Function Backup-CertificateServicesDatabase {
 # SIG # Begin signature block
 # MIInGwYJKoZIhvcNAQcCoIInDDCCJwgCAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUN+6N/z0xFeK7KapoHD8ig1S7
-# YrqggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUKPfVCFiIdqbHXDLFIWBbq58T
+# yUyggiDDMIIFjTCCBHWgAwIBAgIQDpsYjvnQLefv21DiCEAYWjANBgkqhkiG9w0B
 # AQwFADBlMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYD
 # VQQLExB3d3cuZGlnaWNlcnQuY29tMSQwIgYDVQQDExtEaWdpQ2VydCBBc3N1cmVk
 # IElEIFJvb3QgQ0EwHhcNMjIwODAxMDAwMDAwWhcNMzExMTA5MjM1OTU5WjBiMQsw
@@ -314,30 +347,30 @@ Function Backup-CertificateServicesDatabase {
 # NiBTSEEzODQgMjAyMSBDQTECEAFmchIElUK4sup54tMHrEQwCQYFKw4DAhoFAKB4
 # MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
 # gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkE
-# MRYEFKmk9DiP1rjZudFXK1FowjoqPXwrMA0GCSqGSIb3DQEBAQUABIIBgFCC/G42
-# GbY9rR3jNDsFUJwLnvGsgx7TK8DNZhvqfFUP2W5D5mNqoyyFGODoJ69UpgUq31ya
-# 88MR8TrAtUZ8LyHJMnrwV7wosC76S9IBUJod1sLX7od5HKkqVoek93Y5g+d+B+dW
-# UbNunXad1gtqCiR6Lf2uS5NuOH38uzhUad1PJbLUPepnpzQcgSKL7jnWn27JjWYm
-# j/xKKefT96s08Yu6vzlT7AP1lKH4vKqJDeejRHwupqiI5P3POOokyFN3Gh/EcjE1
-# eavZ5x3OFMJDnft3fS8Zrh9Hyn1nAsdugaJw3U2pntvIrHscYtCmowNmgSu9EpAI
-# 05fziwjrWAdvvbUF+dlqPFl5wvTmaioC3EHpDKh1Dm3RIfUPS72EMLZzM8DdJisr
-# /E93gxg6YAPzzIu8Sx2DnPXhombyNZ1N3glE3jAZdgI+elsVhf7d0NzvaXLsYVr6
-# NoxKZZVOyVKHxMaEmdVdo7bR1FEXUHiCvnKDQRcdDASE3eSDcuWYfg5y6qGCAyAw
+# MRYEFNXU6g7pTizjo9LzHCnU+aP+HZimMA0GCSqGSIb3DQEBAQUABIIBgKrCmpQ1
+# RpLg/GFb6dxgNI0kal/Gj+tiwss3dANe5z5Y5RGYPED64mAMcF/+QRqvwXEmDiYz
+# Gj50rxJ4jeWbgV1s2yrhZDetae5dvRlQwWynziBIEl0FXCfiRYdC9f8hrRGa4Fy8
+# gOoGU9+UuHsiVE7/iL46UmINydkHbDwEyU4QZgK9umDit6wxhxOOZQgS0TNE5U7D
+# IrYd3zpuOuIFiDx4//R5fD49KE5DAw0B7LnDDMKCXoD/QO3txmdRmpXa5S1daruj
+# aWKgogy8LUkpAvaxLoIkQ3iMA8SqXXWS+mGHA3DtR6P1TdIarbLfnDovOX2G/jY0
+# 1fWOhWoMeRN+QNZgf+nBIsGtC6eM2CkaHGmUfaz1s/KmjlFwNKAxGhCDLCSxxKnR
+# r0IIiukcDU95AGMAbJICuv0JBOT2DAKVWA44Y/4v+IuNJ4DThE8KiWW5DEke2IQh
+# ISOoWaPUU9wM7Nbs8PVC5UYTcPMeGeG2Lbxn0zNFJyUaEdL0WM1cIceElKGCAyAw
 # ggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcwFQYD
 # VQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3RlZCBH
 # NCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAVEr/OUnQg5pr/bP1/l
 # YRYwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwG
-# CSqGSIb3DQEJBTEPFw0yNDAzMDEwMTMzMzdaMC8GCSqGSIb3DQEJBDEiBCAH/wiA
-# KICoB+A4OdV3NdFHZjFLuMvIES2dbsArNhIS4TANBgkqhkiG9w0BAQEFAASCAgB5
-# wWn/4+qSakndX1AHVvi5lPwvjFOuQur+Nvz39U8jXWg98njjrQb2eot0XwJ654Ou
-# X2uwwD7doNZ9C4e4mE0rxKEQ3CBlqq2cPpjxs/WPmXzlreNcvTholJmEJhrig1iA
-# NvzIW75K8rH1dDJQaTKe8SD1NSwqAQJrRojx9wALcJzIy8vIFLOMJM+gWxBn8CjT
-# G+n0Jm7gMErSKIEgO3dWFSAGF+A9mRw+VcHy0HAKKTs0S4sGO9f/x1uPtU2oBcTW
-# gfU6UC1ExjVBs7llBb42Gitij953peLVg5AICJmDZQ3Y7NNj0tABpI21pDMHWxdy
-# Wr22CYoF0c5qov/1lMAjOF7KkYkaKTXlFecgNxVRIZFNPli/6puF4VO00LOMLKOT
-# 0JaUMTUFxXn1O/9st1vUH7eiAPyOPz11Ke7UR4t1wN0ixOiQuEuL5hu4QlhXTxz4
-# xtd7aRoo74vc+/MUj4xlWNNtOHwHsVb6RNljKex/NyKO0ZX6NrWWcrZwlsb8TQlG
-# YdYOOWrpSd1r+303WYGuXpgHcS64qxUlIXFlPwjzdXER4MN8uOACl318x8mcft55
-# NbU82emX2jX2u/xbs8l3lOzjBK365aUpUdZdSZ1/EVA4Xk0dup0N6QEr6R7wf0dP
-# oUCotIZZTVWSe0ayGyzfqS5y2Uz0B6rYdfGLX7xJoA==
+# CSqGSIb3DQEJBTEPFw0yNDA4MTEyMzQ0MDBaMC8GCSqGSIb3DQEJBDEiBCCgxVj/
+# HTGUvrKTiMY7wX9y7OKTqZax2GZxu4moWcjPnDANBgkqhkiG9w0BAQEFAASCAgCY
+# 55hdDDdCmPHonVdn+/tSjYoZ53tjno+OVUrIdHIpoMeCqdfsCFL2CYKiIWjkmqMi
+# RqKbhk3fvgTwzkBu2zCnKP7l14aUeiE62fPzffxzifSrzUd111dVFOF54IM5rCqK
+# Gse11quLl7ULJ937AnTlBOkeL8CxIBOHzKLoL7APSuxx4smIdJ8+pYMXqNKb3KV9
+# VRPCW7ImceB5a6Gcvr15KZgxqUzlSVAM/jmogBagpd4a1d+BNmpKA7NzESmfKrle
+# 3w0FuxaHSEO4gz4N9OnsZjvW0rMIyMzS0ztRPHyromIwxb2pQ8NuHMkWMJ/IPymT
+# MTxPE65XOEjpRv1bu9L1oxcxcWLgqR9TEVcMKsiJJopJznWgixVyeo3ay6G0MZFT
+# MdL57xKP4DWs5Po6TmmpKXYXlaMGUTuo4uF2stmwHIosMG627qHHp+J+qB23wLxC
+# xg+I4Lx4F1lhSMMXxsYnkiCpE1yNMlv1s46ClFN1vqXs8Uuh1nNk/04P6cfutlxJ
+# h+feR3yRW1Hz86RHSZCitZrQ5lij2UNmHp4e6G7yzHf+MZGKbNUDNDappPiJfyyI
+# uhETYdCupjghm0myPmPnn7hC/3lRn74MVrHOTlCcMxy1giNPCIkbpahQtVtvXNmZ
+# OQOp1tJsDIv9mHtE0pcz1BwedfO3GtjfnLiJGpPz5w==
 # SIG # End signature block
