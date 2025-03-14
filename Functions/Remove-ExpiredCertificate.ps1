@@ -16,7 +16,7 @@
     Use this switch to delete records from the CA database. If this switch is not present, the script only displays records that will be deleted, if any.
 
 .PARAMETER LogFilePath
-    Specifies the location to store CA maintenance log files. The default location is C:\CAMaintenanceLogs.
+    Specifies the location to store CA maintenance log files. The default location is C:\Users\<username>\AppData\Local\Temp\.
 
 .PARAMETER CompressDatabase
     Use this switch to compress the CA database after performing maintenance (recommended).
@@ -54,9 +54,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:            1.3
+    Version:            1.3.1
     Creation Date:      January 18, 2020
-    Last Updated:       May 21, 2024
+    Last Updated:       March 10, 2025
     Special Note:       This script adapted from original published guidance by Andre Gibel
     Original Author:    Andre Gibel
     Original Script:    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
@@ -263,10 +263,10 @@ Function Remove-ExpiredCertificate {
 }
 
 # SIG # Begin signature block
-# MIIfngYJKoZIhvcNAQcCoIIfjzCCH4sCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfnAYJKoZIhvcNAQcCoIIfjTCCH4kCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAidyEtEjAuEsna
-# fxtyCe8x26ysF0ozKBbs1Bk/5jeclqCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCejGa95D9+OQx9
+# Xy16zIG1iXLXcL9l2pxuwyHv+p8qaKCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -407,29 +407,29 @@ Function Remove-ExpiredCertificate {
 # 04WQzYuVNsxyoVLObhx3RugaEGru+SojW4dHPoWrUhftNpFC5H7QEY7MhKRyrBe7
 # ucykW7eaCuWBsBb4HOKRFVDcrZgdwaSIqMDiCLg4D+TPVgKx2EgEdeoHNHT9l3ZD
 # BD+XgbF+23/zBjeCtxz+dL/9NWR6P2eZRi7zcEO1xwcdcqJsyz/JceENc2Sg8h3K
-# eFUCS7tpFk7CrDqkMYIEkjCCBI4CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
+# eFUCS7tpFk7CrDqkMYIEkDCCBIwCAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
 # ChMORGlnaUNlcnQsIEluYy4xPDA6BgNVBAMTM0RpZ2lDZXJ0IEdsb2JhbCBHMyBD
 # b2RlIFNpZ25pbmcgRUNDIFNIQTM4NCAyMDIxIENBMQIQDUo02oaQj8ATLLyBN5Ov
 # JDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkG
 # CSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEE
-# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCAlPXk+ueB4/RazQkjIXuN/QLiM6H6Xbmyq
-# InxRfDOiMTALBgcqhkjOPQIBBQAESDBGAiEA7or9sT3/EX9NuJWgTKPchjZzPNxq
-# 2kqpijyi7N9lwMMCIQDxrVGLJV5ttPiHSOwXMK85QAkopMtKRX1qbFbf59QGAaGC
-# AyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcw
-# FQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3Rl
-# ZCBHNCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAuuZrxaun+Vh8b5
-# 6QTjMwQwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcB
-# MBwGCSqGSIb3DQEJBTEPFw0yNTAyMTcxOTE1NTNaMC8GCSqGSIb3DQEJBDEiBCCs
-# sfhTYwO3zBfF5PQQJL4IfSDyUXlenjqPdbcPGZUymzANBgkqhkiG9w0BAQEFAASC
-# AgCcNQ/PiH2ROrfjOAQyNtkboFIgp9AuPHwwU0WjDxl5URF+393PeoyjN3IqBfpm
-# 9qMxp7ZKqMyA3VyglnnzS8NDV8ObaWL31x1dLejjQRBwIsBGlR+kKQerkefhUg9j
-# jBswDUNhoelmj3awf1MsFPyI/X9x627noSLceSX08cGHjlsZ+utS7crnRkJKb+rL
-# M6lSExFfNmFQfum46dfxX+3V5NQEKzEXG1M3E/Ate3ojuBm9NrYZBFZX+A26pN2q
-# Y6FUK2vdjg0AgaTeUCPPWak62tFpp4QC0Kz8/ngPZqAGzwhHAyEmSqPLmfRTRnmJ
-# IXT3Hbeo+rfSnizj/f4nyMR9MhuLBariG/ZEflcozZA3RSXMaw7fJOICOFrtQnmk
-# r0//o/VLPs3fFbgqQFk41rLs0REHb0fZ4x3yWSSFLn2HGXn3fhr1DGOrIHTrbjzC
-# jhJhbusM/rjQ59RR2Pgjt0a5iVs/5kl3nGwGcSBhce8lnFeBmdv9GxajrkvAJD7w
-# 0D/KLmJkGbHehK7OFOQ6+8m8mBHBOpK9E3ct+gEosRKPgP/yPa+qQABxZxsZjr1k
-# EVg/qi/VcsAKtnWanPvFzKrScYeYsbNkbOuRsu2MaNWO6UTdBfIK2hSToRvNT7zn
-# 8zCacbr1ZmVmQQEwSSYP3EvdIC9z1IdEkMGmYuxZ8ellVg==
+# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDPlqkJGDMdMk8xI5tH1UqDVaVz7ixa50BI
+# bwGRKhkZxzALBgcqhkjOPQIBBQAERjBEAiARfubuP2PoZvfwMNle8OvHjVhhE8oV
+# Au091Y51QQtVAQIgMnevpkBfk/mR8LLgDCjs8tcyW+Nbpuf4iV17sB7zWTehggMg
+# MIIDHAYJKoZIhvcNAQkGMYIDDTCCAwkCAQEwdzBjMQswCQYDVQQGEwJVUzEXMBUG
+# A1UEChMORGlnaUNlcnQsIEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFRydXN0ZWQg
+# RzQgUlNBNDA5NiBTSEEyNTYgVGltZVN0YW1waW5nIENBAhALrma8Wrp/lYfG+ekE
+# 4zMEMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAc
+# BgkqhkiG9w0BCQUxDxcNMjUwMzExMDEyODMzWjAvBgkqhkiG9w0BCQQxIgQgDte4
+# uYf8i5thJYmkMgHHrVWCGnsxv3x0HG/Qj4j4PJQwDQYJKoZIhvcNAQEBBQAEggIA
+# LsOTIqZO3ATB7V5e2bPd/SUW5fwo/jJyhKXk6q7f7Hj4e96mXi07rpJNZYbk1kd1
+# wPwg+/yDxURCmCDCwq8YLkotfhldTiRbH1ppxrKMjqTTaUvJOFo76T4eadLe80mD
+# D0QqXw+vrk58hBxg+VpletyAiIwWldx8gLF8tLoR6/mtMBzQH7OYoF+vKImzisyJ
+# OnmpK1/uhBfI2aLkuu+JiyayrPmsQ2oCccSss99VCXlI3hk4d3ACCzH4IUFUJxXJ
+# s09XNYVpBS+h1SgotYZIdzBTWp3R1f/LKEqu++Fbq+rOjBc9AYGwfDlNTuBz8RtB
+# yysnaYhEjkawRUO4OZDMYDSpSkOAtWknfqB3h/AV9MYIlBW8C/7RL2433C1jbCpJ
+# +heMnW3+dKvSLa0QAkqzVJuQ+0JErVkt8T3ddUb2yvhyqRPwzzVh3v+KhIlv7EaW
+# NfBrT3lJ+P1qWqI5vl3lIHqX2Qmik2vD5s4n8V9c7sS0DFfC6Z31ghu2VfUi5r5P
+# 0AzbqTSJ/GZBk1Q9eAzMSW3uEoEYJyUAgX3MS/jQ6fFYB+SQJjfRokng+RRX0vaz
+# NBmkb/cLAkLDFlt5DbzbG2zf37PhpEqyNSr3CfUmcxBSw6lR0a04jjRlOpwpgu5S
+# 0SYmuT5bRmvn4nPcK53Qfy0qX28tjKKfdKqJBmAC4Fo=
 # SIG # End signature block

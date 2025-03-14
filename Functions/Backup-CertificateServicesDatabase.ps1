@@ -37,9 +37,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.3
+    Version:        1.4
     Creation Date:  January 20, 2020
-    Last Updated:   November 8, 2024
+    Last Updated:   March 14, 2025
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -121,7 +121,7 @@ Function Backup-CertificateServicesDatabase {
 
     # Export CA configuration registry entries
     Write-Verbose 'Exporting CA registry entries...'
-    Invoke-Command -ScriptBlock { reg.exe export HKLM\System\CurrentControlSet\Services\CertSvc\Configuration $LocalPath\$Hostname.reg /y | Out-Null }
+    [void](Invoke-Command -ScriptBlock { reg.exe export HKLM\System\CurrentControlSet\Services\CertSvc\Configuration $LocalPath\$Hostname.reg /y })
 
     # Copy CAPolicy.inf
     If (Test-Path "$env:systemroot\CAPolicy.inf") {
@@ -139,9 +139,13 @@ Function Backup-CertificateServicesDatabase {
     Write-Verbose 'Recording published templates...'
     Invoke-Command -ScriptBlock { certutil.exe -catemplates | Out-File $LocalPath\templates.txt }
 
-    # Record machine SID (useful for server migrations)
-    Write-Verbose 'Recording machine SID...'
-    Get-Sid -SidType Machine | Out-File $LocalPath\sid.txt
+    # Record machine SID if domain-joined (useful for server migrations)
+    If ((Get-CimInstance -ClassName Win32_ComputerSystem).PartOfDomain) {
+
+        Write-Verbose 'Recording machine SID...'
+        Get-Sid -SidType Machine | Out-File $LocalPath\sid.txt
+
+    }
 
     # Record current CA signing certificate thumbprint (useful for server migrations)
     $CaInfo = Invoke-Command -ScriptBlock { certutil.exe -dump } | Out-String
@@ -199,10 +203,10 @@ Function Backup-CertificateServicesDatabase {
 }
 
 # SIG # Begin signature block
-# MIIfngYJKoZIhvcNAQcCoIIfjzCCH4sCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfnQYJKoZIhvcNAQcCoIIfjjCCH4oCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDkipniqLHeWVea
-# 1BPSmLENM70KAtnSR091S5asbvv2DqCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAfuPj0AQadIg2a
+# 2iJ+fVqCG5mSTDWhnTEA5phRBFzOBaCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -343,29 +347,29 @@ Function Backup-CertificateServicesDatabase {
 # 04WQzYuVNsxyoVLObhx3RugaEGru+SojW4dHPoWrUhftNpFC5H7QEY7MhKRyrBe7
 # ucykW7eaCuWBsBb4HOKRFVDcrZgdwaSIqMDiCLg4D+TPVgKx2EgEdeoHNHT9l3ZD
 # BD+XgbF+23/zBjeCtxz+dL/9NWR6P2eZRi7zcEO1xwcdcqJsyz/JceENc2Sg8h3K
-# eFUCS7tpFk7CrDqkMYIEkjCCBI4CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
+# eFUCS7tpFk7CrDqkMYIEkTCCBI0CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
 # ChMORGlnaUNlcnQsIEluYy4xPDA6BgNVBAMTM0RpZ2lDZXJ0IEdsb2JhbCBHMyBD
 # b2RlIFNpZ25pbmcgRUNDIFNIQTM4NCAyMDIxIENBMQIQDUo02oaQj8ATLLyBN5Ov
 # JDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkG
 # CSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEE
-# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDWCMsOPNC23+3opicTf9JAUsX3D1tC5fLu
-# iUN/yW782DALBgcqhkjOPQIBBQAESDBGAiEAyz8GopoEiW5g8NrGiV3PIldTKhnt
-# Gf3XAQn7p3umxaQCIQDze221vsqrk5KkhUjBG3vPRxXc0ONapHQaCvPLe1NK2KGC
-# AyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcw
-# FQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3Rl
-# ZCBHNCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAuuZrxaun+Vh8b5
-# 6QTjMwQwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcB
-# MBwGCSqGSIb3DQEJBTEPFw0yNTAyMTcxOTE1NTBaMC8GCSqGSIb3DQEJBDEiBCDm
-# xR3kAxojGrjhgkRrl1KrogURP6lXhBZZ7mduJIr3kzANBgkqhkiG9w0BAQEFAASC
-# AgCueG+Tngv2m2cuQT3ynpySeyuv0y4a+bJYp2wT2ZuvhhXh8Pop+BlfdRey8C0w
-# +vKhOhexXGmeUJAf+YKtrolkOGsBjflL7c8tYwW53i3/1r0zeosYNBBbmQMlsXeQ
-# 2axK2VEBKYvFMcpeuSmzdglO3pCqiiTdk/X1Wd0NJsoV12O9MxvtRdIXFZkXMVjF
-# 70h2JeS08Yj8XNgKl6lw0SUZYmfxsPyU6rB36aWSjgfwV6Wd2WUR4B4IDo8H8UUa
-# do+9M6B8gJPvpSsyPG+cqiMReG8/kVJ1tY859N3RGe/SwE7mp+clUeV2liWmBQGd
-# uq5mUNPyOkRgUZZfkJACmaPNzm7PHMH9Mk7wxk0nchawEYMPhRuEFkArQuwLUHxq
-# KtxHwdsb/Zjnx8rs+uN5NZL9LJjTs/CR6OCuynWoujlfAMfZRj2FuOMCjZA3wqPX
-# eS16Ci3OuU10s38Wdf6omf6egVInqN8EapBN0iLfQQlJuXChlUnsjk9IulsLm42f
-# bhEd9mPxz6J8p/m4Oe+fH3zmrh2ENE/3Sdgre79Bbl6TslCtulxWu9/UJOXN7OxQ
-# 3O6sbrUPUrMtGKdnzcCe1GmDYzBSaIe0Bogb6z3Exw8btzsA5sxOwN0K21VvCaGV
-# aSoRa3VjMQ4MDLALAQWW7HX4Fk4PoEYmRZKZmdHs+7k85g==
+# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCkrBKvBiajQnCLyxqRIjcZDE5wXfR4pyO3
+# wiN64HXHITALBgcqhkjOPQIBBQAERzBFAiA3b/LSmSkkfzYZL0r7FBwgfDSYVWXb
+# paMIpnCznmK2PAIhANscHnlYvTQ5/ulJRLRWCeCQxiyCftzzZB7G0QHBeV0+oYID
+# IDCCAxwGCSqGSIb3DQEJBjGCAw0wggMJAgEBMHcwYzELMAkGA1UEBhMCVVMxFzAV
+# BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2VydCBUcnVzdGVk
+# IEc0IFJTQTQwOTYgU0hBMjU2IFRpbWVTdGFtcGluZyBDQQIQC65mvFq6f5WHxvnp
+# BOMzBDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEw
+# HAYJKoZIhvcNAQkFMQ8XDTI1MDMxNDIzMTQwMlowLwYJKoZIhvcNAQkEMSIEIHAq
+# 5MabkQm3RQM9NpA6gYCI+knodP7cc+5yUT/sJCxTMA0GCSqGSIb3DQEBAQUABIIC
+# AFM/ZWcHPIOXYfgglLuStVR0VqTRqZmh6Qq72+k9CGICtGIqjfRLaoVEmfwxR0Be
+# t2LjCdHLVxqiMAm9UCFJC2SkZvTYi4Sgv8uUgLnEnLLAOTOLaQcpP+TWV/6Cf80Y
+# KvLPxorjHGky7mKcQJxvY0c13tibKuGtHJw1w92ua1pYu30xPiCO/kNgk4iqE4Lw
+# l2F/3+Y4YxkjDs2Q1pk2wG6tHz/PV1DccvhU6x/ET75yF8gpPPMDtrEHp+RQdZCx
+# OsfjdrKq3pGLrPUOnWdMwZDFXojKQRyVAgOajPiAszY1/ydRmO6uSa4P3zO31E8t
+# lFtPiL77knm2ikR5MB9GJfDQ1Xnnu4cgaZrFmdAyGyx+7MmNyYSjTEBG9afEKUeE
+# z/hN0VcPPDUgTjrXcB+K58zVQkKnuFkTao1iN6sMhFbBdHP5/m/snbEzEwVjDe3X
+# i8ABIykZ1LncjQQ/SmmjTR0dxr5JQl4kS5l6AtObE1WMwtl9oGqlpeagiBYCCOP3
+# Aom6/OR+ZdT+nyloNhml8wQsFP6qX4up4xlcJ90MNJUSQ3lDwZNhRC6ptLJUfNg8
+# LC28igw6S2JNbMDBreWe6q78ZZvWLC6fYB6WyLrxu8VBPoKqawTJ4gHtjcW0Ty6Q
+# FWzqvQGnzRiGak2qbfR4PE+GFEHorZCFTtVO+dLSFimd
 # SIG # End signature block
