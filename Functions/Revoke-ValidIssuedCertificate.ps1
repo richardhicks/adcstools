@@ -1,23 +1,49 @@
 <#
 
 .SYNOPSIS
-    PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
-
-.EXAMPLE
-    Import-Module -Name ADCSTools.psd1
+    This script revokes all valid issued certificates on a Windows Server with the Certificate Authority role installed.
 
 .DESCRIPTION
-    This is a collection of tools to perform various administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
+    When retiring a Certificate Authority (CA), it is important to revoke all valid issued certificates to prevent unauthorized use. This script automates the process of revoking all valid issued certificates on a CA server. It also provides an option to issue a new Certificate Revocation List (CRL) after revocation.
+
+.PARAMETER IssueCrl
+    Specifies whether to issue a new Certificate Revocation List (CRL) after revoking the certificates. If this parameter is not specified, the script will not issue a CRL, and the user must do so manually.
+
+.INPUTS
+    None
+
+.OUTPUTS
+    None
+
+.EXAMPLE
+    Revoke-ValidIssuedCertificate
+
+    This command revokes all valid issued certificates.
+
+.EXAMPLE
+    Revoke-ValidIssuedCertificate -IssueCrl
+
+    This command revokes all valid issued certificates and issues a new Certificate Revocation List (CRL) after revocation.
+
+.EXAMPLE
+    Revoke-ValidIssuedCertificate -WhatIf
+
+    This command simulates the revocation of all valid issued certificates without actually performing the operation. It will show what would happen if the command were run.
+
+.EXAMPLE
+    Revoke-ValidIssuedCertificate -Force
+
+    This command revokes all valid issued certificates without prompting for confirmation. Use with caution, as this action is irreversible.
 
 .LINK
-    https://github.com/richardhicks/adcstools
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Revoke-ValidIssuedCertificate.ps1
 
 .LINK
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.8.0
-    Creation Date:  June 27, 2023
+    Version:        1.0
+    Creation Date:  June 20, 2025
     Last Updated:   June 20, 2025
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
@@ -26,24 +52,103 @@
 
 #>
 
-[CmdletBinding()]
+Function Revoke-ValidIssuedCertificate {
 
-Param (
+    [CmdletBinding(SupportsShouldProcess)]
 
-)
+    Param (
 
-# Dot source nested script files
-Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
+        [Alias('Crl')]
+        [switch]$IssueCrl,
+        [switch]$Force
 
-    . $_.FullName
+    )
+
+    # Ensure script is running on a Windows Server with the Certificate Authority role installed
+    $CertSvc = Get-Service -Name CertSvc -ErrorAction SilentlyContinue
+    If (-not $CertSvc) {
+
+        Write-Error 'This script must be run on a Windows Server with the Certificate Authority role installed.'
+        Return
+
+    }
+
+    # Get current date in M/d/yyyy format
+    $Date = Get-Date -Format M/d/yyyy
+
+    # Run certutil command and capture output
+    $ValidCertificates = certutil.exe -view -restrict "Disposition=20,NotAfter>=$Date" -out "SerialNumber"
+
+    # Use regex to extract serial numbers
+    $SerialNumbers = $ValidCertificates | Select-String -Pattern 'Serial Number: "([0-9a-f]+)"' | ForEach-Object { $_.Matches.Groups[1].Value }
+
+    # Determine if any valid issued certificates were found
+    If ($SerialNumbers.Count -eq 0) {
+
+        Write-Warning 'No valid certificates found to revoke.'
+        Return
+
+    }
+
+    # Warn user about the number of certificates to be revoked
+    Write-Warning "This will revoke $($SerialNumbers.Count) valid issued certificate(s)."
+
+    # Skip confirmation if -Force is specified, otherwise prompt with ShouldContinue
+    If (-not $Force) {
+
+        If (-not $PSCmdlet.ShouldContinue('Do you want to continue?', 'All valid issued certificates on this CA will be revoked. This action is irreversible.')) {
+
+            Write-Warning 'Operation cancelled by user.'
+            Return
+
+        }
+
+    }
+
+    # Revoke certificates
+    ForEach ($Certificate in $SerialNumbers) {
+
+        If ($PSCmdlet.ShouldProcess("Certificate $Certificate", "Revoke")) {
+
+            #certutil.exe -revoke $Certificate 5
+            $Result = certutil.exe -revoke $Certificate 5 2>&1
+
+            # Check for errors
+            If ($LASTEXITCODE -ne 0) {
+
+                Write-Error "Failed to revoke certificate $Certificate. Error: $Result"
+
+            }
+
+        }
+
+    }
+
+    # Issue CRL if requested
+    If ($IssueCrl) {
+
+        If ($PSCmdlet.ShouldProcess("CA", "Issue CRL")) {
+
+            Write-Verbose "Issuing CRL..."
+            certutil.exe -crl
+
+        }
+
+    }
+
+    Else {
+
+        Write-Warning 'An updated CRL must be issued manually to reflect the changes made by this script.'
+
+    }
 
 }
 
 # SIG # Begin signature block
-# MIIfngYJKoZIhvcNAQcCoIIfjzCCH4sCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfnAYJKoZIhvcNAQcCoIIfjTCCH4kCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDphhSN8OqN/qfv
-# MkwSJbixENu43qYK1Yy2j8IQrnOr0qCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCgc/tGEH6cyvGf
+# /HDxKfOBkRhNik/fHAx4Z0IX9lxcSKCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -184,29 +289,29 @@ Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
 # 04WQzYuVNsxyoVLObhx3RugaEGru+SojW4dHPoWrUhftNpFC5H7QEY7MhKRyrBe7
 # ucykW7eaCuWBsBb4HOKRFVDcrZgdwaSIqMDiCLg4D+TPVgKx2EgEdeoHNHT9l3ZD
 # BD+XgbF+23/zBjeCtxz+dL/9NWR6P2eZRi7zcEO1xwcdcqJsyz/JceENc2Sg8h3K
-# eFUCS7tpFk7CrDqkMYIEkjCCBI4CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
+# eFUCS7tpFk7CrDqkMYIEkDCCBIwCAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
 # ChMORGlnaUNlcnQsIEluYy4xPDA6BgNVBAMTM0RpZ2lDZXJ0IEdsb2JhbCBHMyBD
 # b2RlIFNpZ25pbmcgRUNDIFNIQTM4NCAyMDIxIENBMQIQDUo02oaQj8ATLLyBN5Ov
 # JDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkG
 # CSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEE
-# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCCbPAu6ll8JLawJPkvUJWWOSWdnjDsaVy5
-# yEEgK6AnujALBgcqhkjOPQIBBQAESDBGAiEAxqzIVJWTulSTnQsIzQDrxA/Tr+l4
-# frxge3A0sfjAKNUCIQCuv+WGP/Zj4d/VuePPqz2rt+sj4m9kRRl6RRF+nHXQf6GC
-# AyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcw
-# FQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3Rl
-# ZCBHNCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAuuZrxaun+Vh8b5
-# 6QTjMwQwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcB
-# MBwGCSqGSIb3DQEJBTEPFw0yNTA2MjAyMzQ0MzRaMC8GCSqGSIb3DQEJBDEiBCAy
-# KB1XmbDYYRreyqPFib1aRTsdTP2dW/wDjezYMnY2bjANBgkqhkiG9w0BAQEFAASC
-# AgCu0Kgu0Y1FjnzjrB9nqWss92c8377zjts19fdinIjsdXQv/VmMp+uETnrXjohM
-# qQWnNvsYMDiPiWJqD0qn/MD1pRPASA7CgcyKZrl5aGhi3C/GA2POnOnne1ujrbkE
-# C2ffUC4K7E0p3sII6vp2fZQ1OAvJFDX/xhHtSCuTdNSKhdWsZ7F6+dmMVBsrrTOK
-# agFHUloWJX6qOJc7ucwT9Djv7WtOpX4zLOfpNuYKM7GfUew8Lz1n9pBHbr+Luktn
-# GJ76oxXJy1rvb5faHR3Q8MzFyveilsbAuo1E7xde3nss/347T0BmAHHW4SVZBOtT
-# K+P2mxgYg+pv8FRQ7aQKv0GDNnPV95IXgGFytsmjfRwJTNSJwfE126k01dGDOBYu
-# Lew7JoYCm6JgAu/Sr1d9tkjnzvu93R3i/DKrMn/Wpg8q4bdU72Y66Wy5BPiS6cTw
-# mnS0sS6BR05aBl9GC7j1WKDpogMm/myHD7fJi7qOPJsKRRiQrIOUpYXUGQq/MCTf
-# WVOxLPugYw+GCuKWkoeS5CkF+Ooph3hF+dxaLKQq9TO4nkQUgDz6/jwPypL/9Gd6
-# haYqMwlET/MwvwaGdSdr/K+b3puDsrZ/xlbT5vUTPMxGnGQd28J7xPO2kM9gD0kr
-# 4y1avoq9x7DBqz+A2jT8i5KAlUO/4QaVOeBUQKSsE4a5XQ==
+# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCB2v8TEp+tdJMJU2tDcByWC2JVHNg/VtnIE
+# k+i5sI27PjALBgcqhkjOPQIBBQAERjBEAiA3zOBbcdEHQtqBoIXGPgWiGQU8rO/Z
+# 6izv5rO+OQpgSwIgZ99fDq0xvAbdYOlriaZ2qDo+FNFQfPYu4n9GJasaE6mhggMg
+# MIIDHAYJKoZIhvcNAQkGMYIDDTCCAwkCAQEwdzBjMQswCQYDVQQGEwJVUzEXMBUG
+# A1UEChMORGlnaUNlcnQsIEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFRydXN0ZWQg
+# RzQgUlNBNDA5NiBTSEEyNTYgVGltZVN0YW1waW5nIENBAhALrma8Wrp/lYfG+ekE
+# 4zMEMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAc
+# BgkqhkiG9w0BCQUxDxcNMjUwNjIwMjM0NjM0WjAvBgkqhkiG9w0BCQQxIgQg54Rp
+# TXL4I85zer0eukZZcsDdzMiPzzwDVTQl0LikFWgwDQYJKoZIhvcNAQEBBQAEggIA
+# TYS7Z+KvdMyfuV4OtKZ4q2U/51RHxQSkMais+T/ODur1Do+hQfm5KdbXn/MnX7ho
+# XRnhNMZ4k+Pb44r+a67eNS1Vgx1eEMEgmWCvohcd3w2f5beWYuiDIQlJIGK77I6q
+# MOpp3vFh4IrZRaf1EF2ERLRWDT/eaRvjM8+2ovuBtuejCdutZGiYig7RqQDIyObD
+# xilPca8WXRd4IFL1wB1c+Ma3fVdmabGxWGVadix2Ato6NWNJKy/fJiyPX9kYWDRx
+# EzrZ6AAgHNV4uaANseCrNlTDsd6I1tet7TSIuH3EfpYagwk1BvxuvkSGSVmEteoX
+# 2eB0haCKP26PJFFGnMVMvVeoO4Y2pty7X4S1LLyvHt0uA0SNXbaG9bg1JBWh0nXo
+# dQR3BzUm0qtN/OnmHG+aBbwDy0U0senc+fZpk875/Q9ZuiYqM+mwF4jUMoNXdzPw
+# +4D6wyZ/gDohf5JhHmTyhIN4OXHCj9Xeqg30Q1e2yBr/diuebapV8DHsopZ3aTUy
+# 5tloQyNxFJdTReiuawAw4fVhu3TXQhhAEYEhs36HImtsUQBj8MLFVFL3bZbcCAMo
+# 1cY+xAeeBUgaq6gCXzXHcYJv4GvYsvcb1soG9GBY7kkyTShFoljv9XpGsTgi+CAg
+# ZzxrsYZXhNHgausrFDmyA6ZEryhdpsfaaVrKRutg73c=
 # SIG # End signature block

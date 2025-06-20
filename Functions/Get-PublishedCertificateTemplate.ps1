@@ -1,23 +1,25 @@
 <#
 
 .SYNOPSIS
-    PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
+    Retrieve a list of certificate templates published in Active Directory Certificate Services (AD CS).
 
 .EXAMPLE
-    Import-Module -Name ADCSTools.psd1
+    Get-PublishedCertificateTemplate
+
+    This command retrieves a list of certificate templates published in Active Directory Certificate Services.
 
 .DESCRIPTION
-    This is a collection of tools to perform various administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
+    This function retrieves a list of certificate templates published in Active Directory Certificate Services. The output is a table that lists each certificate template and the enrollment servers that have published it.
 
 .LINK
-    https://github.com/richardhicks/adcstools
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Get-PublishedCertificateTemplate.ps1
 
 .LINK
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.8.0
-    Creation Date:  June 27, 2023
+    Version:        1.1.1
+    Creation Date:  February 21, 2024
     Last Updated:   June 20, 2025
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
@@ -26,24 +28,54 @@
 
 #>
 
-[CmdletBinding()]
+Function Get-PublishedCertificateTemplate {
 
-Param (
+    [CmdletBinding()]
 
-)
+    Param (
 
-# Dot source nested script files
-Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
+    )
 
-    . $_.FullName
+    # Retrieve the PKI container DN
+    Write-Verbose 'Retrieving PKI container DN...'
+    $PkiContainerDN = "CN=Public Key Services,CN=Services,$((Get-ADRootDSE).ConfigurationNamingContext)"
+    Write-Verbose "PKI container DN is $PkiContainerDN."
+
+    # Retrieve the enrollment servers and the certificate templates they have published
+    Write-Verbose 'Retrieving enrollment servers and published certificate templates...'
+    $EnrollmentServers = Get-ADObject -Filter { ObjectClass -eq "PkiEnrollmentService" } -SearchBase $PkiContainerDN -Properties * | Sort-Object DnsHostName
+
+    # Retrieve the list of published certificate templates
+    Write-Verbose 'Retrieving published certificate templates...'
+    $PublishedTemplates = $EnrollmentServers | ForEach-Object { $_.CertificateTemplates } | Sort-Object -Unique
+
+    # Create a custom object to store the results
+    $PublishedTemplates  | ForEach-Object {
+
+        $Obj = [PSCustomObject] @{
+
+            Template = $_
+
+        }
+
+        ForEach ($CA in $EnrollmentServers) {
+
+            $Obj | Add-Member NoteProperty $CA.DnsHostName -Value ($CA.CertificateTemplates -Contains $Obj.Template)
+
+        }
+
+        # Output the results to the console
+        $Obj
+
+    }
 
 }
 
 # SIG # Begin signature block
-# MIIfngYJKoZIhvcNAQcCoIIfjzCCH4sCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIfnQYJKoZIhvcNAQcCoIIfjjCCH4oCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDphhSN8OqN/qfv
-# MkwSJbixENu43qYK1Yy2j8IQrnOr0qCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAZF1QX5yep3RZD
+# ImNtzL81+YQW+wyP5xWMz42ClOUoMKCCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -184,29 +216,29 @@ Get-ChildItem -Path $PSScriptRoot\Functions\*.ps1 | ForEach-Object {
 # 04WQzYuVNsxyoVLObhx3RugaEGru+SojW4dHPoWrUhftNpFC5H7QEY7MhKRyrBe7
 # ucykW7eaCuWBsBb4HOKRFVDcrZgdwaSIqMDiCLg4D+TPVgKx2EgEdeoHNHT9l3ZD
 # BD+XgbF+23/zBjeCtxz+dL/9NWR6P2eZRi7zcEO1xwcdcqJsyz/JceENc2Sg8h3K
-# eFUCS7tpFk7CrDqkMYIEkjCCBI4CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
+# eFUCS7tpFk7CrDqkMYIEkTCCBI0CAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
 # ChMORGlnaUNlcnQsIEluYy4xPDA6BgNVBAMTM0RpZ2lDZXJ0IEdsb2JhbCBHMyBD
 # b2RlIFNpZ25pbmcgRUNDIFNIQTM4NCAyMDIxIENBMQIQDUo02oaQj8ATLLyBN5Ov
 # JDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkG
 # CSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEE
-# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCCbPAu6ll8JLawJPkvUJWWOSWdnjDsaVy5
-# yEEgK6AnujALBgcqhkjOPQIBBQAESDBGAiEAxqzIVJWTulSTnQsIzQDrxA/Tr+l4
-# frxge3A0sfjAKNUCIQCuv+WGP/Zj4d/VuePPqz2rt+sj4m9kRRl6RRF+nHXQf6GC
-# AyAwggMcBgkqhkiG9w0BCQYxggMNMIIDCQIBATB3MGMxCzAJBgNVBAYTAlVTMRcw
-# FQYDVQQKEw5EaWdpQ2VydCwgSW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3Rl
-# ZCBHNCBSU0E0MDk2IFNIQTI1NiBUaW1lU3RhbXBpbmcgQ0ECEAuuZrxaun+Vh8b5
-# 6QTjMwQwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcB
-# MBwGCSqGSIb3DQEJBTEPFw0yNTA2MjAyMzQ0MzRaMC8GCSqGSIb3DQEJBDEiBCAy
-# KB1XmbDYYRreyqPFib1aRTsdTP2dW/wDjezYMnY2bjANBgkqhkiG9w0BAQEFAASC
-# AgCu0Kgu0Y1FjnzjrB9nqWss92c8377zjts19fdinIjsdXQv/VmMp+uETnrXjohM
-# qQWnNvsYMDiPiWJqD0qn/MD1pRPASA7CgcyKZrl5aGhi3C/GA2POnOnne1ujrbkE
-# C2ffUC4K7E0p3sII6vp2fZQ1OAvJFDX/xhHtSCuTdNSKhdWsZ7F6+dmMVBsrrTOK
-# agFHUloWJX6qOJc7ucwT9Djv7WtOpX4zLOfpNuYKM7GfUew8Lz1n9pBHbr+Luktn
-# GJ76oxXJy1rvb5faHR3Q8MzFyveilsbAuo1E7xde3nss/347T0BmAHHW4SVZBOtT
-# K+P2mxgYg+pv8FRQ7aQKv0GDNnPV95IXgGFytsmjfRwJTNSJwfE126k01dGDOBYu
-# Lew7JoYCm6JgAu/Sr1d9tkjnzvu93R3i/DKrMn/Wpg8q4bdU72Y66Wy5BPiS6cTw
-# mnS0sS6BR05aBl9GC7j1WKDpogMm/myHD7fJi7qOPJsKRRiQrIOUpYXUGQq/MCTf
-# WVOxLPugYw+GCuKWkoeS5CkF+Ooph3hF+dxaLKQq9TO4nkQUgDz6/jwPypL/9Gd6
-# haYqMwlET/MwvwaGdSdr/K+b3puDsrZ/xlbT5vUTPMxGnGQd28J7xPO2kM9gD0kr
-# 4y1avoq9x7DBqz+A2jT8i5KAlUO/4QaVOeBUQKSsE4a5XQ==
+# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBMjRDFvucZk4VZjnonHOxtio9pDmtinhmu
+# xW0DOti65TALBgcqhkjOPQIBBQAERzBFAiAxMfjG+hwnKbyslji5OGlHqE4XqEk9
+# JRMSboPHY5zGCAIhAM/MKkHy1fHAxtz+/6u9NdjtleXZ7R1rHzT+Ow89YEiGoYID
+# IDCCAxwGCSqGSIb3DQEJBjGCAw0wggMJAgEBMHcwYzELMAkGA1UEBhMCVVMxFzAV
+# BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTswOQYDVQQDEzJEaWdpQ2VydCBUcnVzdGVk
+# IEc0IFJTQTQwOTYgU0hBMjU2IFRpbWVTdGFtcGluZyBDQQIQC65mvFq6f5WHxvnp
+# BOMzBDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEw
+# HAYJKoZIhvcNAQkFMQ8XDTI1MDYyMDIzNDYyNlowLwYJKoZIhvcNAQkEMSIEICGe
+# KhNn3Xuo8JYBLxoBeF7wXx3UjKpH7K5z4uvFz9wJMA0GCSqGSIb3DQEBAQUABIIC
+# AD67Pk0ISqdYT9dE+LI9EenQWQ26qn0m/L4eE/FmcEMvwKYbFdusiKgvOIzJSlY0
+# tOo9gyq8meWIWIHB1PVACowBBxZf8XXG+DtPPjfQoEoN6/psEJcPwglSFonF1RuY
+# vide8fi1J9frHWZ5k7Z2GJ2phqoRs1J6ZuKFMt9IoVQGVzdlnEeCrkJrj3Nkwgcl
+# QQp3Q7LiSCfZdT2UKhQgv5CJtCSy85XIYYLETaEYD/CL1TV2lAskaEumwL+etMoo
+# 29elLK6vAwfPJsBYVGR5/pq+ioXkOwXyhvadDXgMY4aSw/mW47BJpXOkTRkeCqT2
+# gpoEPwvhb903eqJPTIHBpLOBMT7UOFOiWxSXoYe3hDppwNcPwW2dlehywxQ069fl
+# J+P/oDdWGekNkVRfBlvB8a8sY4bz0JoyGoZu/5Qi+Cc/gPxOs5MNo8OTZ+Di/duQ
+# CUo3SB7swFLn4IOYaw8z8iGDj0WZhlI7KItb/16nk5osueijldHnDxv2YwcZimQS
+# CkUjabXkpze6rreVTgm0O8I3Z/eVsCd1azdtibjTjY/BCB2P7DKVHw0L5XVQBfdo
+# Ii9Ct6PFv1MmLYKT49JHeWCiGRfneWg4UkmQX+Zw6zcV5D0U1R8BdA8QMNAKM0Qj
+# yEtfyFVjBInlcwu1MxieYVuFWwP8SXHosHyqgUpnRYhM
 # SIG # End signature block
