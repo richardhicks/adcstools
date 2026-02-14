@@ -1,36 +1,23 @@
 <#
 
 .SYNOPSIS
-    This script retrieves information about a specific custom OID object in Active Directory.
-
-.DESCRIPTION
-    This script retrieves information about a specific custom OID object in Active Directory. The script
-    requires the OID to be specified as a parameter. The script will automatically detect the domain's Configuration partition
-    and search for the OID object in the Public Key Services container.
-
-    The script will output the DisplayName, Name, and OID value of the specified custom OID object.
-
-.PARAMETER Oid
-    The custom OID value to search for in Active Directory.
-
-.INPUTS
-    None.
-
-.OUTPUTS
-    PSCustomObject
+    Retrieve all certificate templates from Active Directory and display their names and OIDs.
 
 .EXAMPLE
-    Get-Oid.ps1 -Oid '1.3.6.1.5.5.7.3.2'
+    Get-ADCertificateTemplate
 
-    This example retrieves information about the OID object with the value '1.3.6.1.5.5.7.3.2' in Active Directory.
+    This command retrieves all certificate templates from Active Directory and displays their names and OIDs.
+
+.DESCRIPTION
+    This function retrieves all certificate templates from Active Directory and displays their names and OIDs, which can be helpful for troubleshooting certificate enrollment issues. The function uses the Get-ADObject cmdlet to retrieve all objects from the Certificate Templates container in the Configuration partition of Active Directory. It then loops through each object and creates a custom object for each template, storing the template name and OID. The custom objects are then sorted alphabetically by template name and output to the console.
 
 .LINK
-    https://www.richardhicks.com/
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Get-ADCertificateTemplate.ps1
 
 .NOTES
     Version:        1.0.2
-    Creation Date:  February 20, 2025
-    Last Updated:   February 14, 2026
+    Creation Date:  February 29, 2024
+    Last Updated:   May 7, 2024
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -38,14 +25,11 @@
 
 #>
 
-Function Get-Oid {
+Function Get-ADCertificateTemplate {
 
     [CmdletBinding()]
 
     Param (
-
-        [Parameter(Mandatory)]
-        [string]$Oid
 
     )
 
@@ -64,46 +48,46 @@ Function Get-Oid {
 
     }
 
-    # Automatically detect the domain's Configuration partition
-    $RootDSE = Get-ADRootDSE
-    $ConfigPartition = $RootDSE.ConfigurationNamingContext
+    # Specify the distinguished name of the Certificate Templates container
+    $PkiContainerDN = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$((Get-ADRootDSE).ConfigurationNamingContext)"
+    Write-Verbose "Container path is: $PkiContainerDN."
 
-    # Define the base path for the OID container using the detected Configuration partition
-    $OidPath = "CN=OID,CN=Public Key Services,CN=Services,$configPartition"
+    # Retrieve all objects from the Certificate Templates container
+    $TemplateObjects = Get-ADObject -SearchBase $PkiContainerDN -Filter * -Properties msPKI-Cert-Template-OID, Name, DisplayName
 
-    # Search for the OID object, retrieving only specific properties
-    $OidObject = Get-ADObject -Filter { msPKI-Cert-Template-OID -eq $Oid } -SearchBase $OidPath -Properties DisplayName, Name, msPKI-Cert-Template-OID
+    # Create an array to store the objects
+    $Templates = @()
 
-    # Check if the OID was found and create an output object
-    If ($OidObject) {
+    # Loop through each template object and create custom objects
+    ForEach ($TemplateObject in $TemplateObjects) {
 
-        # Create a PSCustomObject with the desired properties
-        $Result = [PSCustomObject]@{
+        # Create a custom object for each template
+        $TemplateInfo = [PSCustomObject]@{
 
-            DisplayName = $OidObject.DisplayName
-            OID         = $OidObject.'msPKI-Cert-Template-OID'
-            Name        = $OidObject.Name
+            TemplateName        = $TemplateObject.Name
+            TemplateDisplayName = $TemplateObject.DisplayName
+            TemplateOID         = $TemplateObject.'msPKI-Cert-Template-OID'
 
         }
 
-        # Output the object
-        $Result | Format-List
+        # Add the custom object to the array
+        $Templates += $TemplateInfo
 
     }
 
-    Else {
+    # Sort the array of custom objects by TemplateName alphabetically
+    $Templates = $Templates | Sort-Object TemplateName
 
-        Write-Warning "OID $Oid not found in the specified path: $OidPath"
-
-    }
+    # Output the sorted array of custom objects
+    Return $Templates
 
 }
 
 # SIG # Begin signature block
 # MIIf2wYJKoZIhvcNAQcCoIIfzDCCH8gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAcL03FLtWe/LLz
-# sU1AA4xyvCWopQykGHQd+iPhVabPV6CCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC2uX6bmOMU+PtL
+# aqgLolmjQUgD3ODgZfTWuAgyzg9D3KCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -250,24 +234,24 @@ Function Get-Oid {
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg5sYWz70BmyiEjvRcwtWdlXue
-# c32QxxtkGB7g1F0QkSwwCwYHKoZIzj0CAQUABEgwRgIhANtgG2w3ft2z1Nke2R/R
-# wC2iGESZrRemYaKwdoVKTZUUAiEA0LS1cnFNmQS1a/Sd6Ybh0iIzCjpwyFOCOA+m
-# l5hTilGhggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg57Zboi7dqLn/mDvZZHRZMEfJ
+# XTbnjZYI+1bsYPzdqPcwCwYHKoZIzj0CAQUABEgwRgIhAN22PXvSjIKh7MkLjzDK
+# CF95/HQbTmgdgK0mceaXTB5uAiEAhFZ68QqA2qke12CZJcvVmxvGe0BtzoeGE0E0
+# 3PRXiSehggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
 # EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
 # IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
 # AhAKgO8YS43xBYLRxHanlXRoMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
-# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwMjE0MjE1MjE0WjAvBgkq
-# hkiG9w0BCQQxIgQg7KnLSBJ83VzJmNjaIPPGxaJAGv1h1V1+vOqdSnp1RW4wDQYJ
-# KoZIhvcNAQEBBQAEggIAghSovZPtz3FxYGsnA8u/IGl3E+R6u6AB9Fq5WNKdLMlT
-# uPMbJLuU0sbXrcWhznAEMXX62DNS1eBQebRXsKxpo4eC31FT2tbLlPgiwv+CtDUh
-# 4JJfWjYxy2reMkMpDZ7PcxsrrKOdWM/L4rRoC2jV74nn8yuUv26AsjtjKfJbKXIh
-# msgSoApty+K4zQPK1jR0+ZQBpI9bVjkeH1XxXW6PZ6haTusFmKHrZV+jaEhfCwyP
-# gM1QvvAJ51i9XTepYAdghdLBamPO40hoEySeC2NxiEJFUVLPmsZ3EpU7Nmxx7W2s
-# abfH8f2w6mzxV/ixOSs+UE9+F1BXasbnZkIYxJP9+/E+mWH9Z8WHMJIC3vwUDc6X
-# iHsyuWNqH8oyKjsIRN3FNypcCRLxtk45L1j+d0V0Y28w7qsE6c/qy/y14XSS2OJa
-# kZltUb2wXzXg45BqjCiYwTINj8KLaD62z8FKRwZTwt9o8DTw59oF64J8g9+xL2I3
-# eZjis9TpokXIujwr6KcEXWwSwbbSsXcb+zUzLbCxRqfQ6sKKgEH07HlnQ+VGVch8
-# LzyU+rdzHDoKUyoThbG6IX5JqfysP4CfO8nqHPzB9djpjXrNd2Kk8sOc5Lxn6kd8
-# COyRlyRI8IRn9GRAer7hiEgwlNCCGf7Toa0PQuCH3jTXprD8fK8Na2B6RD40xbY=
+# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwMjE0MjE1MjEzWjAvBgkq
+# hkiG9w0BCQQxIgQgJ2nSkai0Xqy6w3bZijBRseZRyUXfuV9kALCkeStPdQgwDQYJ
+# KoZIhvcNAQEBBQAEggIAWDyFrK8XpYRdkJLmAyzVdHclUlhetqSEUUZ8cefdHBuo
+# +Y/Lnh992nZSZGs+Jp6cALYquuBggJDTotZh2eqaNVLuuxF1W80kS9UZFBgCS67i
+# hNgbDMascMAyrAfT9jI0Phge0kuqtomzIX6cI9LWX6HPcKVaH2IHbDqJeJWaKK3B
+# +y1n5R46J6O1pH+AJXYFZ8F33Dl7eV8+2/CmhVh19LMPbbRskyEC7RRCZv6ux7EF
+# 8mgvAC9BNIa7qhUm6v3yjEQ1BvviTxx/4OavBdP8zjB6mqLzKJ8+WwKjl5rFzMMU
+# nIozRBO86LebSc2Ydib1NVJD4HhasmOmWFTIaxcHuqQtCA0j5ZG+GUFlupXPlyE3
+# 92OKdYGEJCekSTeC4HoVe5FL6nECaheDNldBGwV2/2mTTqrEEXUUnvknK2stUqmf
+# 8Axcs5BVAzyCVxsSiYjr15oCE5fVpTEvHQumbGhU78ftHZaHmHt2dUW/kAAb7Vzl
+# z3LFgYS7vmWUh8Md2t0djDi4xvL4LU4ZPH98f768T6L0WGp0JoDLdf0ldkkBzA8F
+# R+JBb7T+dyyJiDagzSSlTTHqQC4+BM2nZy0tw8to6DDDg5wH8O/n4vSZQL2KTf9n
+# Xa25Guq5fC7V7iBIk8KYi1O3UqU0lYNokmfvLlSKL1B2c6xxMOJWJTmLIPtMems=
 # SIG # End signature block

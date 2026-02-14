@@ -3,19 +3,26 @@
 .SYNOPSIS
     Move the CA server database to another folder or volume.
 
+.DESCRIPTION
+    By default, the certificate services database is installed on the C: drive of the server. Ideally, the certificate services database will be located on a separate volume to allow more room for growth. This command can be used to relocate the certificate services database to another folder or volume if required.
+
+    The source path is automatically detected from the certificate services registry configuration. If auto-detection fails, the default path C:\Windows\System32\CertLog\ is used unless an explicit source path is provided.
+
 .PARAMETER SourcePath
-    The current location of the Certificate Services database. Without this parameter the default location C:\Windows\System32\CertLog\ is used.
+    The current location of the Certificate Services database. If not specified, the current location is automatically detected from the registry. If auto-detection fails, the default location C:\Windows\System32\CertLog\ is used.
 
 .PARAMETER DestinationPath
-    The location to move the Sertificate Services database.
+    The location to move the Certificate Services database.
 
 .EXAMPLE
     Move-CertificateServicesDatabase -DestinationPath 'D:\CaDatabase\'
 
-    Running this PowerShell command will move the Certificate Services database from the original location C:\Windows\System32\CertLog\ to the new location D:\CaDatabase\.
+    Running this PowerShell command will move the Certificate Services database from the current location (auto-detected from the registry) to the new location D:\CaDatabase\.
 
-.DESCRIPTION
-    By default, the certificate services database is installed on the C: drive of the server. Ideally, the certificate services database will be located on a separate volume to allow more room for growth. This command can be used to relocate the certificate services database to another folder or volume if required.
+.EXAMPLE
+    Move-CertificateServicesDatabase -SourcePath 'C:\Windows\System32\CertLog\' -DestinationPath 'D:\CaDatabase\'
+
+    Running this PowerShell command will move the Certificate Services database from C:\Windows\System32\CertLog\ to the new location D:\CaDatabase\.
 
 .LINK
     https://github.com/richardhicks/adcstools/blob/main/Functions/Move-CertificateServicesDatabase.ps1
@@ -27,9 +34,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.2.2
+    Version:        1.3
     Creation Date:  January 20, 2020
-    Last Updated:   August 9, 2024
+    Last Updated:   February 14, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -37,139 +44,194 @@
 
 #>
 
+# Require administrative privileges
+#Requires -RunAsAdministrator
+
 Function Move-CertificateServicesDatabase {
 
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
 
     Param (
 
-        [string]$SourcePath = (Join-Path -Path $env:systemroot -ChildPath 'System32\CertLog'),
+        [ValidateNotNullOrEmpty()]
+        [string]$SourcePath,
         [Parameter(Mandatory, HelpMessage = 'Enter the full path to move the certificate services database.')]
+        [ValidateNotNullOrEmpty()]
         [string]$DestinationPath
 
     )
 
-    # Require elevated privileges
-    #Requires -RunAsAdministrator
+    # Verify Certificate Services is installed
+    If (-Not (Get-Service -Name CertSvc -ErrorAction SilentlyContinue)) {
+
+        Write-Warning 'Certificate Services does not appear to be installed on this server.'
+        Return
+
+    }
+
+    $CertSvcConfigPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration'
+
+    # Auto-detect source path from the registry if not explicitly specified
+    If (-Not $PSBoundParameters.ContainsKey('SourcePath')) {
+
+        Try {
+
+            $SourcePath = (Get-ItemProperty -Path $CertSvcConfigPath -Name 'DBDirectory' -ErrorAction Stop).DBDirectory
+            Write-Verbose "Auto-detected CA database location: $SourcePath"
+
+        }
+
+        Catch {
+
+            $SourcePath = Join-Path -Path $env:SystemRoot -ChildPath 'System32\CertLog'
+            Write-Verbose "Unable to detect CA database location from the registry. Using default path: $SourcePath"
+
+        }
+
+    }
 
     # Verify source path exists
-    If (-Not (Test-Path $SourcePath)) {
+    If (-Not (Test-Path -Path $SourcePath)) {
 
         Write-Warning "The source path `"$SourcePath`" does not exist."
         Return
 
     }
 
-    If (Test-Path $DestinationPath) {
+    # Verify destination path does not already exist
+    If (Test-Path -Path $DestinationPath) {
 
-        Write-Warning "The destiation path `"$DestinationPath`" already exists."
+        Write-Warning "The destination path `"$DestinationPath`" already exists."
         Return
 
     }
 
-    Write-Verbose "Moving the Certificate Services database files from $SourcePath to $DestinationPath..."
+    If ($PSCmdlet.ShouldProcess("Certificate Services database", "Move from '$SourcePath' to '$DestinationPath'")) {
 
-    # Stop certificate services
-    Write-Verbose 'Stopping the Certificate Services service...'
-    Stop-Service -Name CertSvc
+        Write-Verbose "Moving the Certificate Services database files from $SourcePath to $DestinationPath..."
 
-    Try {
+        # Stop certificate services
+        Write-Verbose 'Stopping the Certificate Services service...'
+
+        Try {
+
+            Stop-Service -Name CertSvc -ErrorAction Stop
+
+        }
+
+        Catch {
+
+            Write-Warning "Failed to stop the Certificate Services service. $_"
+            Return
+
+        }
 
         # Copy CA database files to new location
-        Write-Verbose "Copying the Certificate Services database files from $SourcePath to $DestinationPath..."
-        Copy-Item -Path $SourcePath -Destination $DestinationPath -Recurse -ErrorAction Stop | Out-Null
+        Try {
 
-    }
+            Write-Verbose "Copying the Certificate Services database files from $SourcePath to $DestinationPath..."
+            Copy-Item -Path $SourcePath -Destination $DestinationPath -Recurse -ErrorAction Stop
 
-    Catch {
+        }
 
-        # If file copy fails, raise error, restart certificate services, and return
-        Write-Warning $_.Exception.Message
-        Write-Verbose 'Restarting the Certificate Services service...'
-        Start-Service -Name CertSvc
-        Return
+        Catch {
 
-    }
+            # If file copy fails, raise error, restart certificate services, and return
+            Write-Warning "Failed to copy database files. $_"
+            Write-Verbose 'Restarting the Certificate Services service...'
+            Start-Service -Name CertSvc
+            Return
 
-    # Use transaction for registry updates
-    Start-Transaction
+        }
 
-    # Update registry settings
-    Write-Verbose 'Updating Certificate Services database location in the registry...'
+        # Update registry settings
+        $RegistryNames = @('DBDirectory', 'DBLogDirectory', 'DBSystemDirectory', 'DBTempDirectory')
 
-    $Parameters = @{
+        # Save original registry values for rollback
+        $OriginalValues = @{}
 
-        Path         = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\'
-        Name         = 'DBDirectory'
-        Value        = $DestinationPath
-        PropertyType = 'String'
-        Force        = $True
+        ForEach ($Name in $RegistryNames) {
 
-    }
+            $OriginalValues[$Name] = (Get-ItemProperty -Path $CertSvcConfigPath -Name $Name -ErrorAction SilentlyContinue).$Name
 
-    New-ItemProperty @Parameters | Out-Null
+        }
 
-    $Parameters = @{
+        Try {
 
-        Path         = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\'
-        Name         = 'DBLogDirectory'
-        Value        = $DestinationPath
-        PropertyType = 'String'
-        Force        = $True
+            Write-Verbose 'Updating Certificate Services database location in the registry...'
 
-    }
+            ForEach ($Name in $RegistryNames) {
 
-    New-ItemProperty @Parameters | Out-Null
+                Set-ItemProperty -Path $CertSvcConfigPath -Name $Name -Value $DestinationPath -ErrorAction Stop
 
-    $Parameters = @{
+            }
 
-        Path         = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\'
-        Name         = 'DBSystemDirectory'
-        Value        = $DestinationPath
-        PropertyType = 'String'
-        Force        = $True
+        }
 
-    }
+        Catch {
 
-    New-ItemProperty @Parameters | Out-Null
+            Write-Warning "Failed to update registry settings. $_"
 
-    $Parameters = @{
+            # Roll back registry changes
+            Write-Verbose 'Rolling back registry changes...'
 
-        Path         = 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration\'
-        Name         = 'DBTempDirectory'
-        Value        = $DestinationPath
-        PropertyType = 'String'
-        Force        = $True
+            ForEach ($Name in $RegistryNames) {
 
-    }
+                If ($Null -ne $OriginalValues[$Name]) {
 
-    New-ItemProperty @Parameters | Out-Null
+                    Set-ItemProperty -Path $CertSvcConfigPath -Name $Name -Value $OriginalValues[$Name] -ErrorAction SilentlyContinue
 
-    # Commit registry changes
-    Complete-Transaction
+                }
 
-    # Start the Certificate Services service
-    Write-Verbose 'Starting the Certificate Services service...'
-    Start-Service -Name CertSvc
+            }
 
-    # Create a readme.txt file in the default location if files are being moved
-    $Text = @"
+            Write-Verbose 'Restarting the Certificate Services service...'
+            Start-Service -Name CertSvc
+            Return
+
+        }
+
+        # Start the Certificate Services service
+        Write-Verbose 'Starting the Certificate Services service...'
+
+        Try {
+
+            Start-Service -Name CertSvc -ErrorAction Stop
+
+        }
+
+        Catch {
+
+            Write-Warning "Failed to start the Certificate Services service. $_"
+            Return
+
+        }
+
+        # Capture timestamp once for consistency
+        $Timestamp = Get-Date
+
+        # Create a readme.txt file in the original location
+        $Text = @"
 The Certificate Services database and log files have been relocated to $DestinationPath.
-The move was performed by $env:USERDOMAIN\$env:USERNAME on $((Get-Date).ToShortDateString()) at $((Get-Date).ToShortTimeString()).
+The move was performed by $env:USERDOMAIN\$env:USERNAME on $($Timestamp.ToShortDateString()) at $($Timestamp.ToShortTimeString()).
 "@
 
-    Write-Verbose "Creating readme.txt file in $SourcePath..."
-    Set-Content -Path ${SourcePath}\readme.txt -Value $Text
+        $ReadmePath = Join-Path -Path $SourcePath -ChildPath 'readme.txt'
+        Write-Verbose "Creating readme.txt file in $SourcePath..."
+        Set-Content -Path $ReadmePath -Value $Text
 
-    Write-Output "Certificate Services database move complete. The database and log files from $SourcePath can be safely deleted."
+        Write-Output 'Certificate Services database move complete.'
+        Write-Warning "The original database and log files in '$SourcePath' were not removed. Manually delete these files to recover disk space."
+
+    }
 
 }
 
 # SIG # Begin signature block
-# MIIfnAYJKoZIhvcNAQcCoIIfjTCCH4kCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBlBuZ9bKgloxII
-# 5VSZZqubEsGWSWtRRuLytzd5futQS6CCGmIwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAT+ex4OFesGHmf
+# 3PEz3a3J2PWVePVeFBN4cysltHIahaCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -238,101 +300,102 @@ The move was performed by $env:USERDOMAIN\$env:USERNAME on $((Get-Date).ToShortD
 # mouyXtTP0UNEm0Mh65ZyoUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPH
 # h6jSTEAZNUZqaVSwuKFWjuyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCN
 # NWAcAgPLILCsWKAOQGPFmCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg6
-# 2fC2h5b9W9FcrBjDTZ9ztwGpn1eqXijiuZQwggauMIIElqADAgECAhAHNje3JFR8
-# 2Ees/ShmKl5bMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
+# 2fC2h5b9W9FcrBjDTZ9ztwGpn1eqXijiuZQwgga0MIIEnKADAgECAhANx6xXBf8h
+# mS5AQyIMOkmGMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNV
-# BAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yMjAzMjMwMDAwMDBaFw0z
-# NzAzMjIyMzU5NTlaMGMxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwg
-# SW5jLjE7MDkGA1UEAxMyRGlnaUNlcnQgVHJ1c3RlZCBHNCBSU0E0MDk2IFNIQTI1
-# NiBUaW1lU3RhbXBpbmcgQ0EwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC
-# AQDGhjUGSbPBPXJJUVXHJQPE8pE3qZdRodbSg9GeTKJtoLDMg/la9hGhRBVCX6SI
-# 82j6ffOciQt/nR+eDzMfUBMLJnOWbfhXqAJ9/UO0hNoR8XOxs+4rgISKIhjf69o9
-# xBd/qxkrPkLcZ47qUT3w1lbU5ygt69OxtXXnHwZljZQp09nsad/ZkIdGAHvbREGJ
-# 3HxqV3rwN3mfXazL6IRktFLydkf3YYMZ3V+0VAshaG43IbtArF+y3kp9zvU5Emfv
-# DqVjbOSmxR3NNg1c1eYbqMFkdECnwHLFuk4fsbVYTXn+149zk6wsOeKlSNbwsDET
-# qVcplicu9Yemj052FVUmcJgmf6AaRyBD40NjgHt1biclkJg6OBGz9vae5jtb7IHe
-# IhTZgirHkr+g3uM+onP65x9abJTyUpURK1h0QCirc0PO30qhHGs4xSnzyqqWc0Jo
-# n7ZGs506o9UD4L/wojzKQtwYSH8UNM/STKvvmz3+DrhkKvp1KCRB7UK/BZxmSVJQ
-# 9FHzNklNiyDSLFc1eSuo80VgvCONWPfcYd6T/jnA+bIwpUzX6ZhKWD7TA4j+s4/T
-# Xkt2ElGTyYwMO1uKIqjBJgj5FBASA31fI7tk42PgpuE+9sJ0sj8eCXbsq11GdeJg
-# o1gJASgADoRU7s7pXcheMBK9Rp6103a50g5rmQzSM7TNsQIDAQABo4IBXTCCAVkw
-# EgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQUuhbZbU2FL3MpdpovdYxqII+e
-# yG8wHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0PAQH/BAQD
-# AgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAkBggrBgEF
-# BQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAChjVodHRw
-# Oi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNy
-# dDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGln
-# aUNlcnRUcnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEEAjALBglg
-# hkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBAH1ZjsCTtm+YqUQiAX5m1tghQuGw
-# GC4QTRPPMFPOvxj7x1Bd4ksp+3CKDaopafxpwc8dB+k+YMjYC+VcW9dth/qEICU0
-# MWfNthKWb8RQTGIdDAiCqBa9qVbPFXONASIlzpVpP0d3+3J0FNf/q0+KLHqrhc1D
-# X+1gtqpPkWaeLJ7giqzl/Yy8ZCaHbJK9nXzQcAp876i8dU+6WvepELJd6f8oVInw
-# 1YpxdmXazPByoyP6wCeCRK6ZJxurJB4mwbfeKuv2nrF5mYGjVoarCkXJ38SNoOeY
-# +/umnXKvxMfBwWpx2cYTgAnEtp/Nh4cku0+jSbl3ZpHxcpzpSwJSpzd+k1OsOx0I
-# SQ+UzTl63f8lY5knLD0/a6fxZsNBzU+2QJshIUDQtxMkzdwdeDrknq3lNHGS1yZr
-# 5Dhzq6YBT70/O3itTK37xJV77QpfMzmHQXh6OOmc4d0j/R0o08f56PGYX/sr2H7y
-# Rp11LB4nLCbbbxV7HhmLNriT1ObyF5lZynDwN7+YAN8gFk8n+2BnFqFmut1VwDop
-# hrCYoCvtlUG3OtUVmDG0YgkPCr2B2RP+v6TR81fZvAT6gt4y3wSJ8ADNXcL50CN/
-# AAvkdgIm2fBldkKmKYcJRyvmfxqkhQ/8mJb2VVQrH4D6wPIOK+XW+6kvRBVK5xMO
-# Hds3OBqhK/bt1nz8MIIGvDCCBKSgAwIBAgIQC65mvFq6f5WHxvnpBOMzBDANBgkq
-# hkiG9w0BAQsFADBjMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIElu
-# Yy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFRydXN0ZWQgRzQgUlNBNDA5NiBTSEEyNTYg
-# VGltZVN0YW1waW5nIENBMB4XDTI0MDkyNjAwMDAwMFoXDTM1MTEyNTIzNTk1OVow
-# QjELMAkGA1UEBhMCVVMxETAPBgNVBAoTCERpZ2lDZXJ0MSAwHgYDVQQDExdEaWdp
-# Q2VydCBUaW1lc3RhbXAgMjAyNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoC
-# ggIBAL5qc5/2lSGrljC6W23mWaO16P2RHxjEiDtqmeOlwf0KMCBDEr4IxHRGd7+L
-# 660x5XltSVhhK64zi9CeC9B6lUdXM0s71EOcRe8+CEJp+3R2O8oo76EO7o5tLusl
-# xdr9Qq82aKcpA9O//X6QE+AcaU/byaCagLD/GLoUb35SfWHh43rOH3bpLEx7pZ7a
-# vVnpUVmPvkxT8c2a2yC0WMp8hMu60tZR0ChaV76Nhnj37DEYTX9ReNZ8hIOYe4jl
-# 7/r419CvEYVIrH6sN00yx49boUuumF9i2T8UuKGn9966fR5X6kgXj3o5WHhHVO+N
-# BikDO0mlUh902wS/Eeh8F/UFaRp1z5SnROHwSJ+QQRZ1fisD8UTVDSupWJNstVki
-# qLq+ISTdEjJKGjVfIcsgA4l9cbk8Smlzddh4EfvFrpVNnes4c16Jidj5XiPVdsn5
-# n10jxmGpxoMc6iPkoaDhi6JjHd5ibfdp5uzIXp4P0wXkgNs+CO/CacBqU0R4k+8h
-# 6gYldp4FCMgrXdKWfM4N0u25OEAuEa3JyidxW48jwBqIJqImd93NRxvd1aepSeNe
-# REXAu2xUDEW8aqzFQDYmr9ZONuc2MhTMizchNULpUEoA6Vva7b1XCB+1rxvbKmLq
-# fY/M/SdV6mwWTyeVy5Z/JkvMFpnQy5wR14GJcv6dQ4aEKOX5AgMBAAGjggGLMIIB
-# hzAOBgNVHQ8BAf8EBAMCB4AwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAKBggr
-# BgEFBQcDCDAgBgNVHSAEGTAXMAgGBmeBDAEEAjALBglghkgBhv1sBwEwHwYDVR0j
-# BBgwFoAUuhbZbU2FL3MpdpovdYxqII+eyG8wHQYDVR0OBBYEFJ9XLAN3DigVkGal
-# Y17uT5IfdqBbMFoGA1UdHwRTMFEwT6BNoEuGSWh0dHA6Ly9jcmwzLmRpZ2ljZXJ0
-# LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFJTQTQwOTZTSEEyNTZUaW1lU3RhbXBpbmdD
-# QS5jcmwwgZAGCCsGAQUFBwEBBIGDMIGAMCQGCCsGAQUFBzABhhhodHRwOi8vb2Nz
-# cC5kaWdpY2VydC5jb20wWAYIKwYBBQUHMAKGTGh0dHA6Ly9jYWNlcnRzLmRpZ2lj
-# ZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFJTQTQwOTZTSEEyNTZUaW1lU3RhbXBp
-# bmdDQS5jcnQwDQYJKoZIhvcNAQELBQADggIBAD2tHh92mVvjOIQSR9lDkfYR25tO
-# CB3RKE/P09x7gUsmXqt40ouRl3lj+8QioVYq3igpwrPvBmZdrlWBb0HvqT00nFSX
-# gmUrDKNSQqGTdpjHsPy+LaalTW0qVjvUBhcHzBMutB6HzeledbDCzFzUy34VarPn
-# vIWrqVogK0qM8gJhh/+qDEAIdO/KkYesLyTVOoJ4eTq7gj9UFAL1UruJKlTnCVaM
-# 2UeUUW/8z3fvjxhN6hdT98Vr2FYlCS7Mbb4Hv5swO+aAXxWUm3WpByXtgVQxiBlT
-# VYzqfLDbe9PpBKDBfk+rabTFDZXoUke7zPgtd7/fvWTlCs30VAGEsshJmLbJ6ZbQ
-# /xll/HjO9JbNVekBv2Tgem+mLptR7yIrpaidRJXrI+UzB6vAlk/8a1u7cIqV0yef
-# 4uaZFORNekUgQHTqddmsPCEIYQP7xGxZBIhdmm4bhYsVA6G2WgNFYagLDBzpmk91
-# 04WQzYuVNsxyoVLObhx3RugaEGru+SojW4dHPoWrUhftNpFC5H7QEY7MhKRyrBe7
-# ucykW7eaCuWBsBb4HOKRFVDcrZgdwaSIqMDiCLg4D+TPVgKx2EgEdeoHNHT9l3ZD
-# BD+XgbF+23/zBjeCtxz+dL/9NWR6P2eZRi7zcEO1xwcdcqJsyz/JceENc2Sg8h3K
-# eFUCS7tpFk7CrDqkMYIEkDCCBIwCAQEweDBkMQswCQYDVQQGEwJVUzEXMBUGA1UE
-# ChMORGlnaUNlcnQsIEluYy4xPDA6BgNVBAMTM0RpZ2lDZXJ0IEdsb2JhbCBHMyBD
-# b2RlIFNpZ25pbmcgRUNDIFNIQTM4NCAyMDIxIENBMQIQDUo02oaQj8ATLLyBN5Ov
-# JDANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkG
-# CSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEE
-# AYI3AgEVMC8GCSqGSIb3DQEJBDEiBCD3axepb3xszZMGQUBfI0woEbxbkfXWM1TP
-# WjXc59CUVjALBgcqhkjOPQIBBQAERjBEAiAQItHKv0J3gNS5nUgEzJdWaxJoYce5
-# Yp/PZDT9oj4nsgIgL/mz6xQO41bU2rkBw/xZwTGKNGxYLDXxm8LiKTsOyluhggMg
-# MIIDHAYJKoZIhvcNAQkGMYIDDTCCAwkCAQEwdzBjMQswCQYDVQQGEwJVUzEXMBUG
-# A1UEChMORGlnaUNlcnQsIEluYy4xOzA5BgNVBAMTMkRpZ2lDZXJ0IFRydXN0ZWQg
-# RzQgUlNBNDA5NiBTSEEyNTYgVGltZVN0YW1waW5nIENBAhALrma8Wrp/lYfG+ekE
-# 4zMEMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAc
-# BgkqhkiG9w0BCQUxDxcNMjUwMjE3MTkxNTUzWjAvBgkqhkiG9w0BCQQxIgQgTJAV
-# QA+lunDP9q3lMnTnYmfJ2q5AhMeRAQICOUweESkwDQYJKoZIhvcNAQEBBQAEggIA
-# kdWZZmyFh1C8i79H1esyKVz+ypQOlajG9lB57fun1LrCzk8+cM7F7Ex9BP0RL9XC
-# hTDM6wyOspm3tGFECGIFIsx9bFxbLC3l6CgII2Eclbmux4d2qpbPyJPCo9KnIbpB
-# ahi6zo2rgJEEnljMyZ5ToLhjhlruLdN+gdWdLuQb3bJWZt9S+29mbq3PDh4GjiGJ
-# EqBIChN21kJvzaHlQKZN7braZe1kGy7oednCJ23NgSH7dqFFS770TlCtDCxHo+pR
-# OHr0V/IlPBIQ1hLDOTe7D0siRJtxMiRt8Qa4Q5GnoULerNeOlekqQUofDLdKwDeq
-# e7dHnGn9FAR6/2WQecZzv3WjJlvJCnD0Y8yUIo7YkjNUv/BFnBcG4EbtunEsW0Hs
-# CggGJw6NjdjE3LydUAb7v+e/Mjn93a8Cro61qeeHcLlNU8Z9uPOFVQnGrhpIJAwk
-# ccYLn9eTbsCcyWHQ5X6OjadzmuEcLuxpakYXTf9R9LJs5KF34x4GFbXhlsMKMNRl
-# NuJHiQ8YZI0LSim2qDf77yOgfc3A5SicFUL4+be5wqgHGF8V8f2yc7Q24jvtiPMK
-# E/AsYxnONegSe6CCmB1K6UOEvI+V1qqcfiBvid9RynrqAObSEtxu6Lr93nSLWU7h
-# uFHH3Oy98mLc9IAj/lrQrGb706/h5RTO5ktkVXhcJXw=
+# BAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBaFw0z
+# ODAxMTQyMzU5NTlaMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwg
+# SW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcg
+# UlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAw
+# ggIKAoICAQC0eDHTCphBcr48RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1DahGP
+# NRcybEKq+RuwOnPhof6pvF4uGjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn5B1I
+# pYzTqpyFQ/4Bt0mAxAHeHYNnQxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLuxBG5A
+# vftBdsOECS1UkxBvMgEdgkFiDNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3IfDRe
+# b6e3mmdglTcaarps0wjUjsZvkgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cVFBUR
+# Jg6zMUjZa/zbCclF83bRVFLeGkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQT/ao
+# fEnS5xLrfxnGpTXiUOeSLsJygoLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gbylsXQ
+# skBBBnGy3tW/AMOMCZIVNSaz7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rKWDEJ
+# lIqLXvJWnY0v5ydPpOjL6s36czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6z1ev
+# +7psNOdgJMoiwOrUG2ZdSoQbU2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9VnePs6B
+# aaeEWvjJSjNm2qA+sdFUeEY0qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQABo4IB
+# XTCCAVkwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6yuKQ
+# VvYv1Ensy04wHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0P
+# AQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAk
+# BggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAC
+# hjVodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9v
+# dEc0LmNydDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5j
+# b20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEE
+# AjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2cTC9
+# vgvItTSmf83Qh8WIGjB/T8ObXAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe36zwb
+# SI/mS83afsl3YTj+IQhQE7jU/kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMDPjTL
+# xLgXf9r5nWMQwr8Myb9rEVKChHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2AIMD
+# 8liyrukZ2iA/wdG2th9y1IsA0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410ANVk
+# o43+Cdmu4y81hjajV/gxdEkMx1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47OvgRa
+# Ps+2ykgcGV00TYr2Lr3ty9qIijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39OlV8
+# cipDoq7+qNNjqFzeGxcytL5TTLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9vODRz
+# W6AxnJll38F0cuJG7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KC
+# LPAlZ66RzIg9sC+NJpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau
+# 1j/1MIDpMPx0LckTetiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPS
+# xyZsq8WhbaM2tszWkPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0
+# aDANBgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNl
+# cnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1w
+# aW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2
+# MDkwMzIzNTk1OVowYzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJ
+# bmMuMTswOQYDVQQDEzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAg
+# UmVzcG9uZGVyIDIwMjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIB
+# ANBGrC0Sxp7Q6q5gVrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdw
+# bHwBSOeLpvPnZ8ZN+vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9
+# RJt/4QhguSssp3qome7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrU
+# cCV3K3E0zz09ldQ//nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iU
+# SROUINDT98oksouTMYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw
+# 2YD3w6ySSSu+3qU8DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe4
+# 6YceNA0LfNsnqcnpJeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seA
+# O+6d2sC26/PQPdP51ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSH
+# lq8xymLnjCbSLZ49kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6
+# EaJ+AliL7ojTdS5PWPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDch
+# Ic2bQhpp0IoKRR7YufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAM
+# BgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNV
+# HSMEGDAWgBTvb1NK6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYD
+# VR0lAQH/BAwwCgYIKwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUF
+# BzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6
+# Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFt
+# cGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5o
+# dHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3Rh
+# bXBpbmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwB
+# BAIwCwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezR
+# CESeY0ByIfjk9iJP2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0
+# k8FUFqNh+tshgb4O6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFO
+# tj7YMTmqPO9mzskgiC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLW
+# U0ziTN6R3ygQBHMUBaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2n
+# HkX/QqvXnNb+YkDFkxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIF
+# eRlqAcuEVT0cKsb+zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqR
+# hoS3Y50OHgaY7T/lwd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7
+# roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47Cdx
+# VRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/r
+# ptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL
+# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJcwggSTAgEBMHgwZDELMAkGA1UEBhMCVVMx
+# FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9i
+# YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
+# Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
+# oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgxtqLIGjLbREmGqWRIdLGjep/
+# Qube7scWQzvWKuaqlFYwCwYHKoZIzj0CAQUABEcwRQIgdRBhYyEoXtkjejtV9A2j
+# bLbBRiHHsfBjm1XPXSzPreQCIQDSKWf/4qoWh+kZlrNE5bllMA4npXTCom1JXr6I
+# n6zhMaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
+# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
+# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
+# EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
+# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjAyMTQyMTUyMTVaMC8GCSqG
+# SIb3DQEJBDEiBCCekWFM6i0VuL+Oib5ChBQfae7gQsTSPCOcdJgu6YfvpTANBgkq
+# hkiG9w0BAQEFAASCAgCu5LkE9uErgVBGuH1SzgFYUuP5GcavjWDe753uI/7upENH
+# QVpoC4C+fKkfMG2DqFyRWrs4w0+cZXsKD5W5K4niPGb0sDdimOZQ/R/l2ZTKpQze
+# B75B4+IBUIp1z5r3mtu2whSk/xklSd/EWTIe1EKzEtgodQuZA/J9PHBukZGY4+Vu
+# pDXTObb9fLAay+ZaLVlsbUWErEcRzcJgzCesj6wmN3/LYj9SIXhhCkmtIijHFPo2
+# j7gSV3eHYYfnXzsNU5ESuiOrOoiIQOu68dunGN1ufAryrmWKzcIoZWy+F91WLKWm
+# VF5mNnxVivNSo5s9R5F2ouxHgpIb9Z8QvfJuGLCv75VqkH/tlaWZyKHfzqGJjsqu
+# 8tChNAtqQ6lONaUbp+OrZn+gA6/mWORh8fQAv3Z38zssi9Z68L+SMpQPQk7aD1Wc
+# VS+TgNNH3yipjJU0Tg6z0FicimJOp7xInj1I388WIcTw/y7WEIAxkBweCHgMDpFB
+# atufXhwF3XP0d2nr2ZIvpo29SEiBlBK5+EuYFU8AIVi57btZwoBrsU3B48zEopj/
+# WmY1DzKdmB8Gzg5ngQpEdgaqwmLqtyNkhLDLXhaQjg9KzEslxjeL71MXYl1360FY
+# kb84a+e9wQnP1tP1PULy2qb9puQqHJ1ZlFKxPdqRkZ5qq22WPk6UaJNElWtPlg==
 # SIG # End signature block
