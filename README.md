@@ -15,7 +15,7 @@ ADCSTools is a collection of PowerShell functions designed to simplify the manag
 ### PowerShell Gallery
 
 ```powershell
-Install-Module -Name ADCSTools
+Install-Module -Name ADCSTools -Scope CurrentUser
 ```
 
 ### Manual Installation
@@ -252,4 +252,5 @@ This project is licensed under the [MIT License](https://github.com/richardhicks
 
 ## Copyright
 
-&copy; 2025 Richard M. Hicks Consulting, Inc. All rights reserved.
+&copy; 2025-2026 Richard M. Hicks Consulting, Inc. All rights reserved.
+
