@@ -1,7 +1,7 @@
 # ADCSTools
 
 [![PowerShell Gallery](https://img.shields.io/badge/PowerShell%20Gallery-ADCSTools-blue)](https://github.com/richardhicks/adcstools)
-[![License](https://img.shields.io/badge/License-See%20License-green)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.9.0-brightgreen)](https://github.com/richardhicks/adcstools)
 
 PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
@@ -244,12 +244,12 @@ Revoke-ValidIssuedCertificate -Force
 
 - Website: [https://www.richardhicks.com/](https://www.richardhicks.com/)
 - GitHub: [https://github.com/richardhicks/adcstools](https://github.com/richardhicks/adcstools)
-- Contact: rich@richardhicks.com
+- X: [@richardhicks](https://x.com/richardhicks)
 
 ## License
 
-This project is licensed under the terms specified in the [LICENSE](https://github.com/richardhicks/adcstools/blob/main/LICENSE) file.
+This project is licensed under the [MIT License](https://github.com/richardhicks/adcstools/blob/main/LICENSE).
 
 ## Copyright
 
-(c) 2024-2025 Richard M. Hicks Consulting, Inc. - All Rights Reserved.
+&copy; 2025 Richard M. Hicks Consulting, Inc. All rights reserved.
