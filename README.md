@@ -173,7 +173,7 @@ Move-CertificateServicesDatabase -SourcePath 'C:\Windows\System32\CertLog\' -Des
 
 ### Remove-ExpiredCertificate
 
-Delete expired certificates from the CA server database. Supports filtering by certificate state, template OID, and date. Optionally compress the database after cleanup. Supports `-WhatIf` for simulation.
+Delete expired certificates from the CA server database. Supports filtering by certificate state, template OID, and date. Optionally compact the database after cleanup. Supports `-WhatIf` for simulation.
 
 #### Parameters
 
@@ -184,7 +184,7 @@ Delete expired certificates from the CA server database. Supports filtering by c
 | `-Date` | String | No | Records older than this date will be deleted. Format: `M/d/yyyy`. Default: today |
 | `-Delete` | Switch | No | Perform the actual deletion. Without this, the command runs in view-only mode |
 | `-LogFilePath` | String | No | Location to store log files. Default: user's temp directory |
-| `-CompressDatabase` | Switch | No | Compress the CA database after maintenance (recommended) |
+| `-CompactDatabase` | Switch | No | Compact the CA database after maintenance (recommended) |
 
 #### Examples
 
@@ -198,8 +198,8 @@ Remove-ExpiredCertificate -State Failed -Delete
 # View expired Issued certificates for a specific template
 Remove-ExpiredCertificate -State Issued -Template '1.3.6.1.4.1.311.21.8.8823763.7881424.11597667.39223303.50834909.808.1387547.7582140'
 
-# Delete all expired Revoked certificates before a specific date and compress the database
-Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -CompressDatabase
+# Delete all expired Revoked certificates before a specific date and compact the database
+Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -CompactDatabase
 ```
 
 ---
