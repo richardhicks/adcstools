@@ -2,7 +2,7 @@
 
 [![PowerShell Gallery](https://img.shields.io/badge/PowerShell%20Gallery-ADCSTools-blue)](https://github.com/richardhicks/adcstools)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.9.0-brightgreen)](https://github.com/richardhicks/adcstools)
+[![Version](https://img.shields.io/badge/Version-1.9.1-brightgreen)](https://github.com/richardhicks/adcstools)
 
 PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
 
@@ -39,6 +39,7 @@ Import-Module -Name ADCSTools
 | [Get-Sid](#get-sid) | Translate a security principal's Security Identifier (SID) |
 | [Move-CertificateServicesDatabase](#move-certificateservicesdatabase) | Move the CA server database to another folder or volume |
 | [Remove-ExpiredCertificate](#remove-expiredcertificate) | Delete expired certificates from the CA server database |
+| [Remove-FailedCertificate](#remove-failedcertificate) | Delete failed and/or denied certificates from the CA server database |
 | [Revoke-ValidIssuedCertificate](#revoke-validissuedcertificate) | Revoke all valid issued certificates on a CA server |
 
 ## Usage
@@ -199,6 +200,41 @@ Remove-ExpiredCertificate -State Issued -Template '1.3.6.1.4.1.311.21.8.8823763.
 
 # Delete all expired Revoked certificates before a specific date and compress the database
 Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -CompressDatabase
+```
+
+---
+
+### Remove-FailedCertificate
+
+Delete failed and/or denied certificates from the CA server database. Optionally compact the database after performing maintenance. Supports `-WhatIf` for simulation.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `-State` | String | Yes | Certificate record type to delete: `Failed`, `Denied`, or `All` |
+| `-Date` | String | No | Records older than this date will be deleted. Format: `M/d/yyyy`. Default: today |
+| `-Delete` | Switch | No | Perform the actual deletion. Without this, the command runs in view-only mode |
+| `-LogFilePath` | String | No | Location to store log files. Default: user's temp directory |
+| `-CompactDatabase` | Switch | No | Compact the CA database after maintenance (recommended) |
+
+#### Examples
+
+```powershell
+# View all failed certificates (view-only mode)
+Remove-FailedCertificate -State Failed
+
+# Delete all denied certificates
+Remove-FailedCertificate -State Denied -Delete
+
+# View all failed and denied certificates (view-only mode)
+Remove-FailedCertificate -State All
+
+# Delete all failed and denied certificates
+Remove-FailedCertificate -State All -Delete
+
+# Delete all failed and denied certificates before a specific date and compact the database
+Remove-FailedCertificate -State All -Date 12/31/2025 -Delete -CompactDatabase
 ```
 
 ---

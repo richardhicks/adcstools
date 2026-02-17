@@ -1,13 +1,10 @@
 <#
 
 .SYNOPSIS
-    Delete expired certificates from the CA server database.
+    Delete failed and/or denied certificates from the CA server database.
 
 .PARAMETER State
-    This parameter defines what type of certificate record to delete - Denied, Failed, Issued, or Revoked.
-
-.PARAMETER Template
-    The Object Identifier (OID) of a specific certificate template to delete database records for. Use Get-ADCertificateTemplate to retrieve the OID of a published certificate template.
+    This parameter defines what type of certificate record to delete - Failed, Denied, or All.
 
 .PARAMETER Date
     Database records older than this date will be deleted.
@@ -22,43 +19,44 @@
     Use this switch to compact the CA database after performing maintenance (recommended).
 
 .EXAMPLE
-    Remove-ExpiredCertificate -State Denied
+    Remove-FailedCertificate -State Failed
 
-    Displays all expired Denied certificates. Does not delete any records.
-
-.EXAMPLE
-    Remove-ExpiredCertificate -State Failed -Delete
-
-    Deletes all expired Failed certificates.
+    Displays all failed certificates. Does not delete any records.
 
 .EXAMPLE
-    Remove-ExpiredCertificate -State Issued -Template '1.3.6.1.4.1.311.21.8.8823763.7881424.11597667.39223303.50834909.808.1387547.7582140'
+    Remove-FailedCertificate -State Denied -Delete
 
-    Displays all expired Issued certificates based on the specified certificate template OID. Does not delete any records.
+    Deletes all denied certificates.
 
 .EXAMPLE
-    Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -CompactDatabase
+    Remove-FailedCertificate -State All
 
-    Deletes all expired Revoked certificates prior to December 31, 2022 and compacts the CA database.
+    Displays all failed and denied certificates. Does not delete any records.
+
+.EXAMPLE
+    Remove-FailedCertificate -State All -Delete
+
+    Deletes all failed and denied certificates.
+
+.EXAMPLE
+    Remove-FailedCertificate -State All -Date 12/31/2025 -Delete -CompactDatabase
+
+    Deletes all failed and denied certificates prior to December 31, 2025 and compacts the CA database.
 
 .DESCRIPTION
-    Use this command to remove expired certificates from a CA server, and optionally compact the CA database after performing maintenance.
+    Use this command to remove failed and/or denied certificates from a CA server, and optionally compact the CA database after performing maintenance.
 
 .LINK
-    https://github.com/richardhicks/adcstools/blob/main/Functions/Remove-ExpiredCertificate.ps1
-
-.LINK
-    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Remove-FailedCertificate.ps1
 
 .LINK
     https://www.richardhicks.com/
 
 .NOTES
-    Version:            1.4.1
-    Creation Date:      January 18, 2020
+    Version:            1.0
+    Creation Date:      February 16, 2026
     Last Updated:       February 16, 2026
-    Special Note:       This script adapted from original published guidance by Andre Gibel
-    Original Author:    Andre Gibel
+    Special Note:       This script inspired by original published guidance by Andre Gibel
     Original Script:    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
     Author:             Richard Hicks
     Organization:       Richard M. Hicks Consulting, Inc.
@@ -67,17 +65,15 @@
 
 #>
 
-Function Remove-ExpiredCertificate {
+Function Remove-FailedCertificate {
 
     [CmdletBinding(SupportsShouldProcess)]
 
     Param (
 
         [Parameter(Mandatory)]
-        [ValidateSet('Denied', 'Failed', 'Issued', 'Revoked')]
+        [ValidateSet('Failed', 'Denied', 'All')]
         [String]$State,
-        [ValidatePattern('^([0-9\.\s])+$')]
-        [String]$Template,
         [ValidatePattern('^(0?[1-9]|1[0-2])/(0?[1-9]|[12][0-9]|3[01])/([0-9]{4})$')]
         [String]$Date = (Get-Date -Format M/d/yyyy),
         [Switch]$Delete,
@@ -87,152 +83,145 @@ Function Remove-ExpiredCertificate {
 
     )
 
-    # Ensure date input is no later than today when viewing or deleting Issued certificates
-    If ($State -eq 'Issued' -And (Get-Date $Date) -gt (Get-Date)) {
-
-        Write-Warning 'The date specified is in the future. Please specify a date no later than today when viewing or deleting Issued certificates.'
-        Return
-
-    }
-
-    $Pathmid = ''
-    $DateFilterField = ''
+    # Build list of states to process
+    $StatesToProcess = @()
 
     Switch ($State) {
 
-        'Issued' {
-
-            $Pathmid = 'Issued'
-            $Disposition = '20'
-            $DateFilterField = 'NotAfter'
-
-        }
-
-        'Revoked' {
-
-            $Pathmid = 'Revoked'
-            $Disposition = '21'
-            $DateFilterField = 'NotAfter'
-
-        }
-
         'Failed' {
 
-            $Pathmid = 'Failed'
-            $Disposition = '30'
-            $DateFilterField = 'Request.SubmittedWhen'
+            $StatesToProcess += @{ Name = 'Failed'; Disposition = '30' }
 
         }
 
         'Denied' {
 
-            $Pathmid = 'Denied'
-            $Disposition = '31'
-            $DateFilterField = 'Request.SubmittedWhen'
+            $StatesToProcess += @{ Name = 'Denied'; Disposition = '31' }
+
+        }
+
+        'All' {
+
+            $StatesToProcess += @{ Name = 'Failed'; Disposition = '30' }
+            $StatesToProcess += @{ Name = 'Denied'; Disposition = '31' }
 
         }
 
     }
 
-    Write-Verbose "`$Pathmid = $Pathmid"
-    Write-Verbose "`$Date = $Date"
-    Write-Verbose "`$Disposition = $Disposition"
+    # Failed and Denied certificates use Request.SubmittedWhen as the date filter field
+    $DateFilterField = 'Request.SubmittedWhen'
 
-    # Path of temporary file needed for further parsing (regular expression)
-    # Folder structure is automatically created if it doesn't exist
-    If (-Not (Test-Path $LogFilePath )) {
+    # Ensure log file path exists
+    If (-Not (Test-Path $LogFilePath)) {
 
         New-Item -Path $LogFilePath -ItemType Directory | Out-Null
 
     }
 
-    If (-Not (Test-Path "$LogFilePath\$Pathmid" )) {
+    If (-Not $Delete) {
 
-        New-Item -Path $LogFilePath\$Pathmid -ItemType Directory | Out-Null
-
-    }
-
-    If ($Delete) {
-
-        $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-$($Date -Replace '[\./-]', '').txt"
+        Write-Warning "'Remove-FailedCertificate' is in view only mode. Use the -Delete parameter to delete CA database entries."
 
     }
 
-    Else {
+    $TotalDeletedCount = 0
 
-        Write-Warning "'Remove-ExpiredCertificates' is in view only mode. Use the -Delete parameter to delete CA database entries."
-        $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-ViewOnly-$($Date -Replace '[\./-]', '').txt"
+    ForEach ($CurrentState in $StatesToProcess) {
 
-    }
+        $Pathmid = $CurrentState.Name
+        $Disposition = $CurrentState.Disposition
 
-    Write-Output "Log file path is $CertLogFilePath."
-    Write-Verbose 'Executing the following command...'
+        Write-Output "`nProcessing $Pathmid certificates (Disposition $Disposition)..."
+        Write-Verbose "`$Pathmid = $Pathmid"
+        Write-Verbose "`$Date = $Date"
+        Write-Verbose "`$Disposition = $Disposition"
 
-    If ($PSBoundParameters['Template']) {
+        # Create subfolder for log files
+        If (-Not (Test-Path "$LogFilePath\$Pathmid")) {
 
-        # Select certificates matching a specific template
-        Write-Verbose "Query: certutil.exe -view -restrict 'Certificate Template=$Template,Disposition=$Disposition,$DateFilterField<=$Date' -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition'"
-        Invoke-Command -ScriptBlock { certutil.exe -view -restrict "Certificate Template=$Template,Disposition=$Disposition,$DateFilterField<=$Date" -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition' | Out-File $CertLogFilePath }
+            New-Item -Path $LogFilePath\$Pathmid -ItemType Directory | Out-Null
 
-    }
+        }
 
-    Else {
+        If ($Delete) {
 
-        # Select certificates matching any template
+            $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-$($Date -Replace '[\./-]', '').txt"
+
+        }
+
+        Else {
+
+            $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-ViewOnly-$($Date -Replace '[\./-]', '').txt"
+
+        }
+
+        Write-Output "Log file path is $CertLogFilePath."
+        Write-Verbose 'Executing the following command...'
         Write-Verbose "Query: certutil.exe -view -restrict 'Disposition=$Disposition,$DateFilterField<=$Date' -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition'"
+
         Invoke-Command -ScriptBlock { certutil.exe -view -restrict "Disposition=$Disposition,$DateFilterField<=$Date" -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition' | Out-File $CertLogFilePath }
 
-    }
+        Write-Verbose 'Processing temporary file...'
+        $MatchingRequestIDCollection = (Select-String -Path $CertLogFilePath -SimpleMatch "Request ID:" | Select-Object line)
 
-    Write-Verbose 'Processing temporary file...'
-    $MatchingRequestIDCollection = (Select-String -Path $CertLogFilePath -SimpleMatch "Request ID:" | Select-Object line)
+        If ($Null -eq $MatchingRequestIDCollection) {
 
-    If ($Null -eq $MatchingRequestIDCollection) {
+            Write-Warning "No $Pathmid entries to delete from the CA database."
+            Continue
 
-        Write-Warning 'No entries to delete from the CA database.'
-        Break
+        }
 
-    }
+        Else {
 
-    Else {
+            Write-Output "Number of $Pathmid entries to delete from CA database: $($MatchingRequestIDCollection.Count)."
 
-        Write-Output "Number of entries to delete from CA database: $($MatchingRequestIDCollection.Count)."
+        }
 
-    }
+        # Delete certificates
+        $EntryDeletedCount = 0
 
-    # Delete expired certificates
-    $EntryDeletedCount = 0
+        # Filter out the HEX part of "Request ID: 0xb (11)"  => "0xb"
+        $MatchingRequestIDCollection | ForEach-Object {
 
-    # Filter out the HEX part of "Request ID: 0xb (11)"  => "0xb"
-    $MatchingRequestIDCollection | ForEach-Object {
+            $ReqIDHex = $_.Line -Replace "(\s*Request\sID\:\s)(0x[a-f|0-9]+)(.*)", '$2'
 
-        $ReqIDHex = $_.Line -Replace "(\s*Request\sID\:\s)(0x[a-f|0-9]+)(.*)", '$2'
+            Try {
 
-        Try {
+                $IDDec = [int]$ReqIDHex
+                If ($Delete) {
 
-            $IDDec = [int]$ReqIDHex
-            If ($Delete) {
+                    Write-Output "Executing command: `"certutil.exe -deleterow $ReqIDHex`" (Request ID $IDDec)"
+                    & certutil.exe -deleterow $ReqIDHex
 
-                Write-Output "Executing command: `"certutil.exe -deleterow $ReqIDHex`" (Request ID $IDDec)"
-                & certutil.exe -deleterow $ReqIDHex
+                }
+
+                $EntryDeletedCount ++
 
             }
 
-            $EntryDeletedCount ++
+            Catch {
+
+                Write-Output 'Error deleting CA database record.'
+
+            }
 
         }
 
-        Catch {
+        If ($Delete) {
 
-            Write-Output 'Error deleting CA database record.'
+            Write-Output "Number of deleted $Pathmid records: $EntryDeletedCount."
 
         }
+
+        $TotalDeletedCount += $EntryDeletedCount
 
     }
 
-    If ($Delete) {
+    # Display total summary when processing both types
+    If ($State -eq 'All') {
 
-        Write-Output "Number of deleted records: $EntryDeletedCount."
+        Write-Output "`nTotal records across all states: $TotalDeletedCount."
 
     }
 
@@ -373,10 +362,10 @@ Function Remove-ExpiredCertificate {
 }
 
 # SIG # Begin signature block
-# MIIf2wYJKoZIhvcNAQcCoIIfzDCCH8gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAPfBR6qVuaNjRq
-# LXeEvqfEQ90B262p0r4LHwgvSyJxDqCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbIT7NV4eUKqZf
+# RE08fQ4K5ZFaDYH1NXk9PBkNjzrDrKCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -518,29 +507,29 @@ Function Remove-ExpiredCertificate {
 # roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47Cdx
 # VRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/r
 # ptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL
-# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJgwggSUAgEBMHgwZDELMAkGA1UEBhMCVVMx
+# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJcwggSTAgEBMHgwZDELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9i
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg7zo8zJEh+Zny6YLgHh8Sb+EN
-# YVm7SefCP/ZJiZp3EPYwCwYHKoZIzj0CAQUABEgwRgIhAIr2GnpbdEgRwpbSuW52
-# JuEmEb4ggJoZ7HBiZ7nUuosPAiEA7/UkozJ2v25vDSz3AaP2U/GxrV9Q1e1N/CVW
-# rlLDgs2hggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
-# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
-# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
-# AhAKgO8YS43xBYLRxHanlXRoMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
-# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwMjE3MDI0MDE1WjAvBgkq
-# hkiG9w0BCQQxIgQgXWaVOg32mCRWLzA464GTASi9/udnU1rNkZ40SAv7OUYwDQYJ
-# KoZIhvcNAQEBBQAEggIAUuLjXfipmW+d/cLwuLN1UL5aPGz/jRkjX1MPXUAlotAO
-# +qFvvHA1zd+FG6TCAjDCaS6Xv35xEyCq225fut8A6b7RURzPy13A7Lm1BP78mFBS
-# VTGCEUuItgVBnq8JcyE6zR/ZWV2qFilxjItUw0AFzIATdahY0ZcIRC0qkus9FCOH
-# YkjA/1p2rJ0PZPEuSQLpy5t/bW2p7ebBoP0srfIowYmLjpn1EbVwBqZyMjAfyZjV
-# oa6v4Y3P3ZGNWdhPnbdWlYNrPcGrD6z5zE+EMwOp2Ml3MQfhu7tA4sUGLWJjdUcO
-# qOHXQCoyPi1aZyWnxSYRvJsfdvRi5UNEVEBvEyINQoztC12q2Dyaum2YWHAnanDo
-# 5Pt0v4KY+Eh6ftYyFOs+CYhXN0jQnQeFNWVClw/AaiGl3Mvppyya+yCWrmFoCc53
-# mrNoUQL2F76fBvCqfzLqZd/dTS0HZiQi5DIZivNxAiR6wyWWrEr4AKLMflWldVse
-# c+YEMFHGdV0NO6U75zcp+2ikGcJpNJKGBlzyKjP3F0F5p3leWmSGn7HclEvZpM7o
-# J1Rymzz+doDyyzpA9P1JHQqSBwE0xXuG/g2eAjm/tL2HgoKXxV2A0JJO62PII3iV
-# nrKk1wm4rCZM1qE9UdFsI87g6v5KWiZ9WA2lzdcP5oCB4MGekHvGUWqaA5pPAWc=
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgQUdRLT7/Mr/C6iNmySTAMNP+
+# uPAB79pS4+460Z9TkG0wCwYHKoZIzj0CAQUABEcwRQIgaPmhNEflX/lEtvMmVDbY
+# Q0EAG++lj+BqkjwvAEt1g5wCIQD+bPgNSsEXFd/UqxETWOkr+HWsxbyfAPTigCm9
+# CKDr4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
+# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
+# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
+# EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
+# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjAyMTcwMjQwMzBaMC8GCSqG
+# SIb3DQEJBDEiBCBMosXQC467ZZZNW4i4W6C/lhCANMTIJz0WxyWTG/JiNTANBgkq
+# hkiG9w0BAQEFAASCAgDD7HicDpmvT1ANspXwcFlSET8r4mTJI+1NoM+/nVRq0vs3
+# qkXK4GUiT33NbzdBgzCKMnuRhBU985RE6NlRp72+0iaxgFp5MNqlZeGOL8GOKbkz
+# iF9iZ/OS12Ys3SAyCrrD3qbLD+hKtpFR3xR2IXbe3CFpB2ebjQNupfia2Ml1V9v2
+# jPMDzrJj7uyOZzHLs3Lue6PBY409blTwYWBbSjz6f3/e0Wi/BzmV8OBDlNgybp3J
+# 01gQDASXOVdYqvjEztS0C9fyIpZJHc3GgxcBNPxkYM6ZyChCMdJbhqZIdWXyM8J3
+# u2xYctfGY9+UHnfmAcXNQxS1ZMHkHgKBZtEtSq/1x+6escpxUmUz8b5ePeQ0MjWJ
+# Iqypbj37b9dO89jxd0gZ6c0x4ke9LdiQs2D7wfRNnwm9hUnlHctBqiLsPzgSv9N0
+# OZ22HL/PULar/ppp9sHXe1wsCWKZlXZVT/zxJLhoBP1SdDHDE9sT7vjszil3/+uy
+# 3BU9mgABPG3H0UJCaFezUrirdKJMklMewxPepchcJ7TD3z1/41nOaZ1RtxbDIPMm
+# reXfoLeKrKdxZYRh5YO9+hI15PVrVknsBYoZS1BCbzIP5ImrijQGh29sOgpodEi6
+# uNhgRKSRbFcEifvb4hJGfcbpYAANxWy8CbY2XYqniQXEn6bMdjHPVUWAFKhk0g==
 # SIG # End signature block
