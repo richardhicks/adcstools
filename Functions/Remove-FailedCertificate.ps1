@@ -53,9 +53,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:            1.0
+    Version:            1.0.1
     Creation Date:      February 16, 2026
-    Last Updated:       February 16, 2026
+    Last Updated:       February 19, 2026
     Special Note:       This script inspired by original published guidance by Andre Gibel
     Original Script:    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
     Author:             Richard Hicks
@@ -225,7 +225,7 @@ Function Remove-FailedCertificate {
 
     }
 
-    If ($CompactDatabase) {
+    If ($Delete -and $CompactDatabase) {
 
         # Identify CA database location
         Write-Verbose 'Identifying certificate services database location...'
@@ -268,11 +268,17 @@ Function Remove-FailedCertificate {
 
         Try {
 
+            # Extract CA name from certutil.exe output to construct integrity check log file path
+            $CaName = (certutil.exe -getconfig | Select-String -Pattern '\\(.+?)"' ).Matches.Groups[1].Value
+            $LogFile = ".\$CaName.INTEG.RAW"
+
+            # Perform CA database integrity check
             Invoke-Command -ScriptBlock { esentutl.exe /g $DbPath }
 
             If ($LASTEXITCODE -ne 0) {
 
                 Write-Warning "Database integrity check failed with exit code $LASTEXITCODE. Database compaction will not be performed."
+                Write-Warning "Please review the integrity check log file located at `'$LogFile`' for more information."
 
                 # Start certificate services service before returning
                 Write-Verbose 'Starting the Certificate Services service...'
@@ -290,6 +296,13 @@ Function Remove-FailedCertificate {
                 }
 
                 Return
+
+            }
+
+            Else {
+
+                Write-Verbose "Removing integrity check log file located at `'$LogFile`'..."
+                Remove-Item -Path $LogFile -ErrorAction SilentlyContinue
 
             }
 
@@ -364,8 +377,8 @@ Function Remove-FailedCertificate {
 # SIG # Begin signature block
 # MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDbIT7NV4eUKqZf
-# RE08fQ4K5ZFaDYH1NXk9PBkNjzrDrKCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD2GN/GM/nUl++A
+# wvURj7lhdseXHhUuHa8F4XjzSHQaN6CCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -512,24 +525,24 @@ Function Remove-FailedCertificate {
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgQUdRLT7/Mr/C6iNmySTAMNP+
-# uPAB79pS4+460Z9TkG0wCwYHKoZIzj0CAQUABEcwRQIgaPmhNEflX/lEtvMmVDbY
-# Q0EAG++lj+BqkjwvAEt1g5wCIQD+bPgNSsEXFd/UqxETWOkr+HWsxbyfAPTigCm9
-# CKDr4qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgh9oNAwctYUfWohIIWVmQFP1C
+# XmUTZe5oxALcr9wXxG0wCwYHKoZIzj0CAQUABEcwRQIgJiVSbC1BmHHn1ClGhuSF
+# GHP9A2J3Xz4ZryLyqQvNUd4CIQCs3FoxAjPHH5vpFUVYEmHyLBbxeKdwm6ml3Vpn
+# WIh4UaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
 # AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
 # VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
 # EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
-# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjAyMTcwMjQwMzBaMC8GCSqG
-# SIb3DQEJBDEiBCBMosXQC467ZZZNW4i4W6C/lhCANMTIJz0WxyWTG/JiNTANBgkq
-# hkiG9w0BAQEFAASCAgDD7HicDpmvT1ANspXwcFlSET8r4mTJI+1NoM+/nVRq0vs3
-# qkXK4GUiT33NbzdBgzCKMnuRhBU985RE6NlRp72+0iaxgFp5MNqlZeGOL8GOKbkz
-# iF9iZ/OS12Ys3SAyCrrD3qbLD+hKtpFR3xR2IXbe3CFpB2ebjQNupfia2Ml1V9v2
-# jPMDzrJj7uyOZzHLs3Lue6PBY409blTwYWBbSjz6f3/e0Wi/BzmV8OBDlNgybp3J
-# 01gQDASXOVdYqvjEztS0C9fyIpZJHc3GgxcBNPxkYM6ZyChCMdJbhqZIdWXyM8J3
-# u2xYctfGY9+UHnfmAcXNQxS1ZMHkHgKBZtEtSq/1x+6escpxUmUz8b5ePeQ0MjWJ
-# Iqypbj37b9dO89jxd0gZ6c0x4ke9LdiQs2D7wfRNnwm9hUnlHctBqiLsPzgSv9N0
-# OZ22HL/PULar/ppp9sHXe1wsCWKZlXZVT/zxJLhoBP1SdDHDE9sT7vjszil3/+uy
-# 3BU9mgABPG3H0UJCaFezUrirdKJMklMewxPepchcJ7TD3z1/41nOaZ1RtxbDIPMm
-# reXfoLeKrKdxZYRh5YO9+hI15PVrVknsBYoZS1BCbzIP5ImrijQGh29sOgpodEi6
-# uNhgRKSRbFcEifvb4hJGfcbpYAANxWy8CbY2XYqniQXEn6bMdjHPVUWAFKhk0g==
+# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjAyMjAwMDU5NDJaMC8GCSqG
+# SIb3DQEJBDEiBCDPhB3toatU1mhfBNNyIBtzcLNRh3tfk9tmLzGWX4RcdjANBgkq
+# hkiG9w0BAQEFAASCAgB7RH0bf01KNNPDoLAbr+DUDOWpv0XnCseu+KHNQB7Klr/o
+# evADWqNs39QFFymSooHf+To7Byuc2jb4PHfvL5aUMZx/M2oWNkBw+hBfWIQCSsJD
+# s44u44KwR1fU0eQFujIvGs+sON929Avmv1as8rRFwz2O98r/a5wB0krCVumDK/qK
+# XGQAdsuMCGnKx/JHkaKoOgICEapjUC/l5taZjJKKyyOrT9ignSzY/opZ0Ym3OWhx
+# iyUgXGGRqfxZzzAd6txUSf8AS7Zh/HB2EZzbl4sL5fJ3vuFu0m6wFESFWpQaUkAH
+# iPNFdY1/kW7cuQsl5mWxnUju9sooFo6Pqxrdo7E9TU0yGvU0BEM7CDyTlQlRIzk5
+# +tZRsw100cMuDqOQ055M1WzHVDGbt7P8fPdRen+BxesRcJF1gF67YHzOVxOnn0Dp
+# GMJKPxxX+Z6keI+utige+4DgYk5KStVNEGmowSwIZ0z7P3GaVqlia1hq1Wiokeao
+# ONqHOtaQYqx74B7J7NPLqACn4BLuo2+MMX5jnLFdIIz520V0WNp4xjfpkTMrqRrA
+# O8R8a1UeyBGaPPKCSpYRS+X0BZKNXeY+yFRDSiNecQD4swnKdBpB+L5MpuikJVMR
+# SfGuTmro6ZH479Fw6jWPmEbroNhoen5pFLNYDvVZo9rwVkdcLOccshqpTdOHpw==
 # SIG # End signature block
