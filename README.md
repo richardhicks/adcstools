@@ -2,7 +2,7 @@
 
 [![PowerShell Gallery](https://img.shields.io/badge/PowerShell%20Gallery-ADCSTools-blue)](https://github.com/richardhicks/adcstools)
 [![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.0.1-brightgreen)](https://github.com/richardhicks/adcstools)
+[![Version](https://img.shields.io/badge/Version-2.0.2-brightgreen)](https://github.com/richardhicks/adcstools)
 
 PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
 

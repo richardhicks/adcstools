@@ -37,9 +37,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:        1.5
+    Version:        1.6
     Creation Date:  January 20, 2020
-    Last Updated:   February 14, 2026
+    Last Updated:   April 28, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
     Contact:        rich@richardhicks.com
@@ -163,14 +163,13 @@ Function Backup-CertificateServicesDatabase {
 
     }
 
-    # Record current CA signing certificate thumbprint (useful for server migrations)
-    $CaInfo = Invoke-Command -ScriptBlock { certutil.exe -dump } | Out-String
-    $Subject = ($CaInfo -split "`n" | Select-String -Pattern "\(Local\)" | ForEach-Object { $CaInfo -split "`n" | Select-Object -Skip (([array]::IndexOf($CaInfo -split "`n", $_.Line)) + 1) | Select-Object -First 1 } | Select-String -Pattern 'Name:\s*"(.+?)"' ).Matches.Groups[1].Value
+    # Extract CA name
+    $Subject = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration').Active
 
     # Search local computer certificate store for newest CA signing certificate
     $CaCert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Subject -match $Subject } | Sort-Object -Property NotAfter -Descending | Select-Object -First 1
 
-    # Record CA certificate thumbprint
+    # Record current CA signing certificate thumbprint (useful for server migrations)
     $CaCert.Thumbprint | Out-File $LocalPath\cacert.txt
 
     # Create archive file in remote location
@@ -219,10 +218,10 @@ Function Backup-CertificateServicesDatabase {
 }
 
 # SIG # Begin signature block
-# MIIf2wYJKoZIhvcNAQcCoIIfzDCCH8gCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIf2gYJKoZIhvcNAQcCoIIfyzCCH8cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzKnDNgCOPB9Yz
-# VBk48jmIKLdX0TSf7ezpUdwJiGxzDqCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACSsAmzYt7mpmh
+# BwvtQ2VeAOVqO3n8e5nte4a6rCIIIqCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
 # A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
 # aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
 # F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
@@ -364,29 +363,29 @@ Function Backup-CertificateServicesDatabase {
 # roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47Cdx
 # VRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/r
 # ptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL
-# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJgwggSUAgEBMHgwZDELMAkGA1UEBhMCVVMx
+# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJcwggSTAgEBMHgwZDELMAkGA1UEBhMCVVMx
 # FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9i
 # YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
 # Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
 # oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgY8fl9UevR6sUu812Ck2aal0X
-# z9qxmsYVxdQTuKEWYXwwCwYHKoZIzj0CAQUABEgwRgIhAOJW0we/VsTxeSem386g
-# QzO0ZoDjklZJwW8Pt4q/toVlAiEA8OeLeSw3dAsLyzruuWYFVOL3c8Ik+QM4puPS
-# RCqgBKmhggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
-# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
-# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
-# AhAKgO8YS43xBYLRxHanlXRoMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
-# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwMjE0MjE1MjEzWjAvBgkq
-# hkiG9w0BCQQxIgQgtTPuN4hB/J7z5Il+Ll9Fsbi5wnV+/As8hZK5te1wXO4wDQYJ
-# KoZIhvcNAQEBBQAEggIAOJTX4GmGXvlIzKnLYwTUBcICszhlkAcIVr9M0NNrppF/
-# SgU5YW3Vha/tUqpmVWTrWLILBKMjs/HfmEKPXrnYiaRHVPAcKrDccul/o9XaZKiT
-# nLQ4gPCaE1zOamoXafQvNd8PCh1XDcwtgxRahz9F8TLVAeiNYCiFpB6q6BE5j9OY
-# RkJssoARoPiK9SZazIG362Q2rDp64G6hqL+vsKaRcyr44bc9ndlirGZqrj44XKFR
-# reTmxRMptzVsfiLwMFh1quaSGA7qGY+oYRWdpaHMOHwIPU/tt20mjOF/2/zU+Up/
-# wsPgxbCuNUJp7J+wdwC/o4O9PmafRq6LNhmJHJp2VK5Av1Fh7bTuHU4PD743AaxG
-# 56U1NQ+x0+2GRgKp3Lahq5SBisNdaLObiF2Pxzsz+BQC23BOs2Emq5mXsttEhM3X
-# EQftJH3JZXJr8apJXS8MDqvXsipVU1wv2pJL34XmsqQex5RR5dR845lqTFuCEghq
-# Ht6BgLzjWG2Rj9fLHxBtSmcZCU2XToljSu4KYpC3A99L9yhtF5SoRsE9kOexJzuz
-# D7SgRwNazEr3Izq7hVE0qtpIr1CMHB8Rx7NS/OPutkc526e4pzN+UX9KML2MMR6s
-# k1OUrqc8o/83kIKz5RPopCJHw/3PkeK0qo3YSxbmPHh67ci8780izSsdzGi462o=
+# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgKHB9JUMY6RcHpZ5KlvJOZrhM
+# pryqdGHyGkqSU3L2KykwCwYHKoZIzj0CAQUABEcwRQIhANLkz9PlxT6Evp/Ja1VN
+# qgxV1u7jtmv5k+sCfmV/mW8BAiAYGe94cBwEnUYnFTiH3DS279iV7j5x7XL1WF19
+# xc2FZaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkxCzAJBgNVBAYT
+# AlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQg
+# VHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEC
+# EAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkqhkiG9w0BCQMx
+# CwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA0MjgxNTI2NTJaMC8GCSqG
+# SIb3DQEJBDEiBCDzQrbswYMySDWBxtUZnHjgyBAfExThrhBIkA/t9Ez7+DANBgkq
+# hkiG9w0BAQEFAASCAgBDhU5pZqpU4UdwWN29p0QfLeooV5zJ4bpwtzpt7UyKSVsX
+# XUAmuib86OWdXqCDfGdRs2LP5vnh/rT91QuwLMhO8soBBw6PSy/++V2gxK9BzyKr
+# p9NoKOvfbA+zeEfTy0GL3droIYOVMWLd51sx5DHsgFoGykgKS356WcSFPfKMpN0K
+# rHNYFyWFrZX1uysK9NuhLX+OxAb1QeC8mYFD6Nf/FBXaF+uLQAoL2qC8wJX/Owo4
+# 0uA2aJ4fZSAbuk4UTwodS0N23BRaXAzXY11NKNS4uR4JqoO74nefN8lW42+pBaBU
+# do9HQqPC3poGdC67BhNLhN6sQIx5kAG20tb82+HLWGZx2DmEzfOcO7DZuzbFcoMP
+# MS+l0KI0zPO6kQ1pXXW42KeuYUHufyM1ykMjVud0fcUAFUnORmQY1VgO7sVUWx7K
+# ru/33QIUrNcYi47mNRpJWIa/LGNV75om39FankJwoFh01dXss1OKDCH1tsmZS1t5
+# jHpP8jEeNuK0RWK6OX90+o7p22XlGWOXw9ly8t/vTHCKgimIExe92TuGUPrYvSGj
+# oSDLva4WkphZ2jLdjHXGwOQlVEIgzpmMODIt7Er75EkNxit0EOmB0NA45SfmbM7c
+# SYtosGNiFA/DtbwCP9nkP7nVSN8moUHIwhDMz7TJ04FML9Q9lt7CXyem0y/nPA==
 # SIG # End signature block
