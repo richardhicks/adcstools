@@ -1,56 +1,43 @@
 <#
 
 .SYNOPSIS
-    Retrieve certificate templates from Active Directory and return their names, display names, and OIDs.
-
-.PARAMETER Name
-    The name of the certificate template to retrieve. Accepts wildcards and matches against the template name, display name, or OID. If omitted, all certificate templates are returned.
-
-.PARAMETER Server
-    The fully qualified domain name (FQDN) of a specific domain controller or domain to query. If omitted, the default domain of the current session is used.
-
-.PARAMETER Credential
-    Alternate credentials to use when querying Active Directory. If omitted, the credentials of the current session are used.
-
-.EXAMPLE
-    Get-ADCertificateTemplate
-
-    Retrieves all certificate templates from Active Directory and returns their names, display names, and OIDs.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name 'LabWebServer'
-
-    Retrieves the certificate template named LabWebServer.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name 'LabNdes*'
-
-    Retrieves all certificate templates with names or display names beginning with LabNdes.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name '1.3.6.1.4.1.311.21.8.16187918.14945684.15749023.11519519.4925321.197.13392998.8282280'
-
-    Retrieves the certificate template with the specified OID.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Server 'dc1.corp.example.net' -Credential (Get-Credential)
-
-    Retrieves all certificate templates from the specified domain controller using alternate credentials.
+    Determine if the current user holds a specific role or permission on the local certification authority.
 
 .DESCRIPTION
-    This function retrieves certificate templates from Active Directory and returns their names, display names, and OIDs, which can be helpful for troubleshooting certificate enrollment issues. The function queries the Certificate Templates container in the Configuration partition of Active Directory and emits a custom object for each template to the pipeline, sorted alphabetically by template name. The output can be filtered, formatted, or exported like any other PowerShell object.
+    Returns True if the current user holds the specified role or permission on the local certification authority, otherwise returns False.
 
-.OUTPUTS
-    PSCustomObject. One object per certificate template with the properties TemplateName, TemplateDisplayName, and TemplateOID.
+    The check is performed by calling the ICertAdmin2::GetMyRoles method via the CertificateAuthority.Admin COM object. GetMyRoles returns the certification authority roles held by the caller as a bit mask. The check does not modify the CA. The Certificate Services service must be running for this check to succeed.
+
+    This is an internal helper function used by other functions in the ADCSTools module. It is intentionally not exported in the module manifest.
+
+.PARAMETER Role
+    The certification authority role or permission to test. Accepted values are ManageCa (Manage CA), ManageCertificates (Issue and Manage Certificates), Auditor (Manage auditing and security log), and Operator (Back up and restore files and directories).
+
+.PARAMETER ConfigString
+    The CA configuration string in the format 'ComputerName\CAName'. If not specified, the configuration string is built automatically from the local Certificate Services registry configuration.
+
+.EXAMPLE
+    Test-CaPermission -Role ManageCa
+
+    Running this PowerShell command will return True if the current user holds the Manage CA permission on the local certification authority.
+
+.EXAMPLE
+    Test-CaPermission -Role ManageCertificates
+
+    Running this PowerShell command will return True if the current user holds the Issue and Manage Certificates permission on the local certification authority.
 
 .LINK
-    https://github.com/richardhicks/adcstools/blob/main/Functions/Get-ADCertificateTemplate.ps1
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Test-CaPermission.ps1
+
+.LINK
+    https://learn.microsoft.com/en-us/windows/win32/api/certadm/nf-certadm-icertadmin2-getmyroles
+
+.LINK
+    https://www.richardhicks.com/
 
 .NOTES
-    This function requires the ActiveDirectory PowerShell module, available as part of the Remote Server Administration Tools (RSAT).
-
     Version:        3.0
-    Creation Date:  February 29, 2024
+    Creation Date:  July 26, 2026
     Last Updated:   July 26, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
@@ -59,89 +46,85 @@
 
 #>
 
-Function Get-ADCertificateTemplate {
+Function Test-CaPermission {
 
     [CmdletBinding()]
-    [OutputType([PSCustomObject])]
+    [OutputType([System.Boolean])]
 
     Param (
 
-        [Parameter(Position = 0)]
-        [SupportsWildcards()]
-        [String]$Name = '*',
-        [String]$Server,
-        [PSCredential]$Credential
+        [Parameter(Mandatory)]
+        [ValidateSet('ManageCa', 'ManageCertificates', 'Auditor', 'Operator')]
+        [String]$Role,
+        [String]$ConfigString
 
     )
 
-    # Build a common set of parameters for all Active Directory cmdlet calls
-    $AdParams = @{
+    # ICertAdmin2::GetMyRoles role bit mask values
+    $RoleMask = @{
 
-        ErrorAction = 'Stop'
-
-    }
-
-    If ($Server) {
-
-        $AdParams['Server'] = $Server
+        ManageCa           = 0x1 # CA_ACCESS_ADMIN - Manage CA
+        ManageCertificates = 0x2 # CA_ACCESS_OFFICER - Issue and Manage Certificates
+        Auditor            = 0x4 # CA_ACCESS_AUDITOR - Manage auditing and security log
+        Operator           = 0x8 # CA_ACCESS_OPERATOR - Back up and restore files and directories
 
     }
 
-    If ($Credential) {
+    If (-Not $ConfigString) {
 
-        $AdParams['Credential'] = $Credential
+        $Active = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -ErrorAction Stop).Active
+        $ConfigString = "$env:COMPUTERNAME\$Active"
 
     }
+
+    $CertAdmin = $Null
 
     Try {
 
-        $RootDSE = Get-ADRootDSE @AdParams
+        $CertAdmin = New-Object -ComObject CertificateAuthority.Admin
+        $Roles = $CertAdmin.GetMyRoles($ConfigString)
+        Return [Bool]($Roles -band $RoleMask[$Role])
 
     }
 
     Catch {
 
-        Throw "Unable to contact Active Directory. Ensure the ActiveDirectory PowerShell module (RSAT) is installed and a domain controller is reachable. Underlying error: $($_.Exception.Message)"
+        $HResult = $_.Exception.HResult
 
-    }
+        If ($_.Exception.InnerException) {
 
-    # Specify the distinguished name of the Certificate Templates container
-    $PkiContainerDN = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$($RootDSE.ConfigurationNamingContext)"
-    Write-Verbose "Container path is $PkiContainerDN."
-
-    Try {
-
-        # Retrieve all certificate template objects from the Certificate Templates container. Name, DisplayName, and OID matching is performed client-side to avoid quoting issues when interpolating user input into an AD filter string.
-        Get-ADObject @AdParams -SearchBase $PkiContainerDN -SearchScope OneLevel -Filter "objectClass -eq 'pKICertificateTemplate'" -Properties 'msPKI-Cert-Template-OID', 'DisplayName' |
-        Where-Object { $_.Name -like $Name -or $_.DisplayName -like $Name -or $_.'msPKI-Cert-Template-OID' -like $Name } |
-        Sort-Object -Property Name |
-        ForEach-Object {
-
-            [PSCustomObject]@{
-
-                TemplateName        = $_.Name
-                TemplateDisplayName = $_.DisplayName
-                TemplateOID         = $_.'msPKI-Cert-Template-OID'
-
-            }
+            $HResult = $_.Exception.InnerException.HResult
 
         }
 
+        # E_ACCESSDENIED (0x80070005) indicates the caller has no access to the CA at all, which also means the requested role is not held. Any other failure (COM class not registered, service not running, RPC failure) is unrelated to permissions and is rethrown
+        If ($HResult -eq -2147024891) {
+
+            Return $False
+
+        }
+
+        Throw
+
     }
 
-    Catch {
+    Finally {
 
-        Throw "Failed to query certificate templates from $PkiContainerDN. Underlying error: $($_.Exception.Message)"
+        If ($CertAdmin) {
+
+            [Void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($CertAdmin)
+
+        }
 
     }
 
 }
 
 # SIG # Begin signature block
-# MIIk6wYJKoZIhvcNAQcCoIIk3DCCJNgCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIk7AYJKoZIhvcNAQcCoIIk3TCCJNkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7uxbi0vDebKfY
-# ayIw684/72epV3MKBVz9WIHi2KUg66CCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCACaUJY8nu4fIRk
+# ZZETZkK+Z9BWOHGwQIaJ7iJESNVv1KCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -310,29 +293,29 @@ Function Get-ADCertificateTemplate {
 # cJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/
 # ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7
 # IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdC
-# vHlshtjdNXOCIUjsarfNZzGCBJswggSXAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
+# vHlshtjdNXOCIUjsarfNZzGCBJwwggSYAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
 # BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVk
 # IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
 # UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCAOvG7TOyHUDHEMUcfN63o
-# 5NIfTJTlpykakUd8Yapl5jALBgcqhkjOPQIBBQAERjBEAiB/5WIUnHGdl7M0RrRB
-# bmeB42rE7EwlcrpbCKsjZjH6+wIgWkjE2LL2DSx4ewhBI1zga1mct0ZCZN3GxDRm
-# yrfj8kOhggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
-# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
-# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
-# AhAKgO8YS43xBYLRxHanlXRoMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
-# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwNzI3MDQwMjUzWjAvBgkq
-# hkiG9w0BCQQxIgQgLj6iLCgmEdc8RuVT1NCUdZCDCgOoVq61E2/LUhBKALEwDQYJ
-# KoZIhvcNAQEBBQAEggIAMyGp84BER+aKjkbubMECKdi7s/DaNuvvrLNnuyqU8XpD
-# hQzFxfEv0aJvSeQWhIIYyewoGQO1is6QmpS2Kfbp190UrbZvtX/4mjw6PpgXMLUU
-# QtiyN7qBVbU6itYr4GVpB4qcm2JrRRMXJtY/0V6xGaPH522fESGxANAN1UB7BULI
-# hUb6MKVsyRPo+GzgPRiAXuVbmgSQcxTT8GCUS1ONY4XviFawdd6ApVIaqQr0nRJ8
-# SkGuuIsAIGrL1H4pucB0xgDzvfH+qMWqWEbRLninuXTSXP+8mpVVwRYzBq3rIcpR
-# XDoEFdTxQEuug1ZeYS1loR1c/ynnMdful6xpzFbG9x5RIy970uz2dBtzLxBb0fMS
-# xvlO3TdawjUwm9yqy2htG8CdKJ21VoOIDI7axfWJAeWvP7iu70T41MVN6bjM0Ea8
-# JqVtcciUBrcVjaXGTo6ahjIeYSdfFPZePYuuo9V3VT0qvBxFTceDqpj4T1wn903K
-# OPZdppANVtsnsObZ2CecPzWcVYt1O2pZkr1A1ZPzwIyF9FKo1m11qLeA8p19gzO2
-# HCU2VDqAZlz3d0ZnMClk8W8fGRbcsFmwaXN+tKZpNamdYtMItVOPm64aBXY8bAr7
-# WrkppFsR/8n4Kmnk2DPyomWlRSLwvqnpzV2FvusvJTGzH2EDtIudGN2T5Yi/BcQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCg/T50Ma0IjLnui/YxFWOU
+# 8xoK84gBkyuRSeetLAjr5TALBgcqhkjOPQIBBQAERzBFAiAo7Bsvb6rcwf+9fAJs
+# 2M4MGBqxC1boMosPYbQQyOj28gIhAIXF/AkeXbh6+RlWT2pwoyuPYQ/5ll8p9c9d
+# eseeR7tFoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
+# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2Vy
+# dCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENB
+# MQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJ
+# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcyNzA0MDI1NlowLwYJ
+# KoZIhvcNAQkEMSIEIFuYpCzJmRhdcPWgnpKXr3wmztRi+f7xiVfam09sLIWiMA0G
+# CSqGSIb3DQEBAQUABIICAF+zuhyG0hzfCPrZQ0ZyAmxtuKOnN7+NB2ULQojgUSM7
+# zk2llosyyxdkijjGfH06+XxZ3fKB45VmD560xf4a3HDqaa4Lr71hZLzyyDrL3Qdj
+# mrninGVy65oW4UL1BYOzmoauI5CdthIv70Mc1aXbDIDHlhZC0afwSoMqJ7APlRjo
+# hvmtbAy/YCdIhuvkUH9L/2AssvCugTwiVNwEgoedV3chxhcLgw+HvF4rajMdmiCH
+# RSWcdwaCD89madDUNI7wmwy7x4cEfWdreUuBhODBCyJXXyBeqOQVinC3u0SbRV4t
+# 9YXWlfUl087R6P6ut6Y0ahdP02ZfHcGndhn4qsQ9cN6z4kP3+3G4tXqCf/iMUwyC
+# i6uH9Ss40ceKv4iMVkc2D5q8pkVrW4r5ELe8HmWFaTQqs9hQNbgWpZQneKznVcMV
+# ASlxqm9NX5b6tJWJCUifFAhGM3+2s7sZW32czcx73gq+7YwPQFPaV420NEKhZARV
+# NKGzk6LA7tkjrNMt3OmWah7uu5MIFm03v4aopJkurmJyLtCAI+cbI1wTxQnZbo+z
+# MgCWvKwwx95o8uPY+c7jaWGYzjUeBzV5Wp/Zj5xwu1rpY8Q3WzWNDzPLuQEgIGzz
+# 2TVifn6JFljI2Svd5F56EpEt0YUVGL5H6Dla7L5Kc3JLSUQ07dYSQvwiq2Lyusze
 # SIG # End signature block

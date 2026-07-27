@@ -4,45 +4,80 @@
     Delete expired certificates from the CA server database.
 
 .PARAMETER State
-    This parameter defines what type of certificate record to delete - Denied, Failed, Issued, or Revoked.
+    This parameter defines what type of certificate record to delete - Denied, Failed, Issued, or Revoked. Multiple values may be specified. Use the value 'All' to process all record types.
 
 .PARAMETER Template
-    The Object Identifier (OID) of a specific certificate template to delete database records for. Use Get-ADCertificateTemplate to retrieve the OID of a published certificate template.
+    The Object Identifier (OID) of a specific certificate template to delete database records for. Use Get-ADCertificateTemplate to retrieve the OID of a published certificate template. When multiple states are specified, the template filter applies to every state processed.
 
 .PARAMETER Date
-    Database records older than this date will be deleted.
+    Database records older than this date will be deleted. Accepts any date format valid for the current culture. The date must be no later than today. The default value is today.
 
 .PARAMETER Delete
-    Use this switch to delete records from the CA database. If this switch is not present, the script only displays records that will be deleted, if any.
+    Use this switch to delete records from the CA database. If this switch is not present, the command runs in view only mode and records that would be deleted are written to a log file for review. No records are deleted. Deleting records requires the Manage CA permission on the certification authority. Deleting records is a high impact operation and confirmation is required by default. Use -Confirm:$false to suppress the confirmation prompt.
 
 .PARAMETER LogFilePath
     Specifies the location to store CA maintenance log files. The default location is C:\Users\<username>\AppData\Local\Temp\.
 
+.PARAMETER Csv
+    Use this switch to create an additional log file in CSV format alongside the standard text log file. The CSV file is written to the same location and shares the same name as the text log file with a .csv extension. Creating the CSV file requires a second CA database query, which may increase processing time on CA servers with large databases.
+
 .PARAMETER CompactDatabase
-    Use this switch to compact the CA database after performing maintenance (recommended).
+    Use this switch to compact the CA database after performing maintenance (recommended). Compacting the database stops and restarts the Certificate Services service and requires an elevated PowerShell session. This switch is only valid when used with the -Delete parameter and is ignored in view only mode because no records are deleted.
 
 .EXAMPLE
     Remove-ExpiredCertificate -State Denied
 
-    Displays all expired Denied certificates. Does not delete any records.
+    Records all expired Denied certificates to a log file for review. Does not delete any records.
 
 .EXAMPLE
     Remove-ExpiredCertificate -State Failed -Delete
 
-    Deletes all expired Failed certificates.
+    Deletes all expired Failed certificates. Confirmation is required before records are deleted. Use -Confirm:$false to suppress the confirmation prompt.
+
+.EXAMPLE
+    Remove-ExpiredCertificate -State Issued, Denied
+
+    Records all expired Issued and Denied certificates to log files for review. Does not delete any records.
+
+.EXAMPLE
+    Remove-ExpiredCertificate -State All -Delete
+
+    Deletes all expired Denied, Failed, Issued, and Revoked certificates. Confirmation is required before records are deleted. Use -Confirm:$false to suppress the confirmation prompt.
+
+.EXAMPLE
+    Remove-ExpiredCertificate -State Issued -Csv
+
+    Records all expired Issued certificates to a log file for review and creates an additional log file in CSV format. Does not delete any records.
 
 .EXAMPLE
     Remove-ExpiredCertificate -State Issued -Template '1.3.6.1.4.1.311.21.8.8823763.7881424.11597667.39223303.50834909.808.1387547.7582140'
 
-    Displays all expired Issued certificates based on the specified certificate template OID. Does not delete any records.
+    Records all expired Issued certificates based on the specified certificate template OID to a log file for review. Does not delete any records.
 
 .EXAMPLE
-    Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -CompactDatabase
+    Remove-ExpiredCertificate -State Revoked -Date 12/31/2022 -Delete -Confirm:$false -CompactDatabase
 
-    Deletes all expired Revoked certificates prior to December 31, 2022 and compacts the CA database.
+    Deletes all expired Revoked certificates prior to December 31, 2022 without prompting for confirmation and compacts the CA database.
+
+.EXAMPLE
+    Remove-ExpiredCertificate -State Issued -Delete -WhatIf
+
+    Displays the records that would be deleted without making any changes to the CA database.
 
 .DESCRIPTION
     Use this command to remove expired certificates from a CA server, and optionally compact the CA database after performing maintenance.
+
+    Deleting records requires the Manage CA permission on the certification authority. Compacting the database requires an elevated PowerShell session.
+
+    This function parses certutil.exe output and requires an English operating system display language.
+
+    This function depends on the private ADCSTools module functions Test-IsElevated and Test-CaPermission and is not intended to run standalone outside the module.
+
+.INPUTS
+    None. This function does not accept pipeline input.
+
+.OUTPUTS
+    PSCustomObject. A summary object for each state processed containing the state, the number of matching records, the number of records deleted, the number of records that could not be processed, the log file path, and the CSV log file path when the -Csv parameter is used.
 
 .LINK
     https://github.com/richardhicks/adcstools/blob/main/Functions/Remove-ExpiredCertificate.ps1
@@ -54,9 +89,9 @@
     https://www.richardhicks.com/
 
 .NOTES
-    Version:            1.4.2
+    Version:            3.0
     Creation Date:      January 18, 2020
-    Last Updated:       February 19, 2026
+    Last Updated:       July 26, 2026
     Special Note:       This script adapted from original published guidance by Andre Gibel
     Original Author:    Andre Gibel
     Original Script:    https://vanbrenk.blogspot.com/2020/12/how-to-cleanup-expired-certificates.html
@@ -69,182 +104,331 @@
 
 Function Remove-ExpiredCertificate {
 
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([PSCustomObject])]
 
     Param (
 
         [Parameter(Mandatory)]
-        [ValidateSet('Denied', 'Failed', 'Issued', 'Revoked')]
-        [String]$State,
-        [ValidatePattern('^([0-9\.\s])+$')]
+        [ValidateSet('All', 'Denied', 'Failed', 'Issued', 'Revoked')]
+        [String[]]$State,
+        [ValidatePattern('^\d+(\.\d+)+$')]
         [String]$Template,
-        [ValidatePattern('^(0?[1-9]|1[0-2])/(0?[1-9]|[12][0-9]|3[01])/([0-9]{4})$')]
-        [String]$Date = (Get-Date -Format M/d/yyyy),
+        [ValidateScript({
+
+                If ($_ -gt (Get-Date)) {
+
+                    Throw 'The date specified is in the future. Specify a date no later than today.'
+
+                }
+
+                $True
+
+            })]
+        [DateTime]$Date = (Get-Date),
         [Switch]$Delete,
         [String]$LogFilePath = $env:temp,
+        [Switch]$Csv,
         [Alias('Compress', 'CompressDatabase')]
         [Switch]$CompactDatabase
 
     )
 
-    # Ensure date input is no later than today when viewing or deleting Issued certificates
-    If ($State -eq 'Issued' -And (Get-Date $Date) -gt (Get-Date)) {
+    # Verify the Certificate Services service is present and running
+    $Service = Get-Service -Name CertSvc -ErrorAction SilentlyContinue
 
-        Write-Warning 'The date specified is in the future. Please specify a date no later than today when viewing or deleting Issued certificates.'
-        Return
+    If (-Not $Service) {
 
-    }
-
-    $Pathmid = ''
-    $DateFilterField = ''
-
-    Switch ($State) {
-
-        'Issued' {
-
-            $Pathmid = 'Issued'
-            $Disposition = '20'
-            $DateFilterField = 'NotAfter'
-
-        }
-
-        'Revoked' {
-
-            $Pathmid = 'Revoked'
-            $Disposition = '21'
-            $DateFilterField = 'NotAfter'
-
-        }
-
-        'Failed' {
-
-            $Pathmid = 'Failed'
-            $Disposition = '30'
-            $DateFilterField = 'Request.SubmittedWhen'
-
-        }
-
-        'Denied' {
-
-            $Pathmid = 'Denied'
-            $Disposition = '31'
-            $DateFilterField = 'Request.SubmittedWhen'
-
-        }
+        Throw 'Certificate Services does not appear to be installed on this server.'
 
     }
 
-    Write-Verbose "`$Pathmid = $Pathmid"
-    Write-Verbose "`$Date = $Date"
-    Write-Verbose "`$Disposition = $Disposition"
+    If ($Service.Status -ne 'Running') {
 
-    # Path of temporary file needed for further parsing (regular expression)
-    # Folder structure is automatically created if it doesn't exist
-    If (-Not (Test-Path $LogFilePath )) {
-
-        New-Item -Path $LogFilePath -ItemType Directory | Out-Null
+        Throw 'The Certificate Services service is not running. Start the service and try again.'
 
     }
 
-    If (-Not (Test-Path "$LogFilePath\$Pathmid" )) {
+    # Deleting CA database records requires the Manage CA permission on the certification authority
+    If ($Delete -and -not (Test-CaPermission -Role ManageCa)) {
 
-        New-Item -Path $LogFilePath\$Pathmid -ItemType Directory | Out-Null
+        Throw 'The current user does not hold the Manage CA permission on this certification authority. Records cannot be deleted.'
 
     }
 
-    If ($Delete) {
+    # Database compaction serves no purpose in view only mode because no records are deleted
+    If ($CompactDatabase -and -not $Delete) {
 
-        $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-$($Date -Replace '[\./-]', '').txt"
+        Write-Warning 'The -CompactDatabase parameter has no effect in view only mode and will be ignored. Use the -Delete parameter to delete records and compact the CA database.'
+        $CompactDatabase = $False
+
+    }
+
+    # Database compaction requires an elevated session to stop the Certificate Services service and access the database files
+    If ($CompactDatabase -and -not (Test-IsElevated)) {
+
+        Throw 'The -CompactDatabase parameter requires an elevated PowerShell session. Run PowerShell as an administrator and try again.'
+
+    }
+
+    # Expand 'All' to every supported state, otherwise remove duplicate values while preserving the order specified
+    $SupportedStates = 'Denied', 'Failed', 'Issued', 'Revoked'
+
+    If ($State -Contains 'All') {
+
+        $StatesToProcess = $SupportedStates
 
     }
 
     Else {
 
-        Write-Warning "'Remove-ExpiredCertificates' is in view only mode. Use the -Delete parameter to delete CA database entries."
-        $CertLogFilePath = Join-Path -Path $LogFilePath -ChildPath "$Pathmid\RequestID-$Pathmid-ViewOnly-$($Date -Replace '[\./-]', '').txt"
+        # Normalize each value to its canonical capitalization so output, warnings, and log file paths are consistent regardless of the casing specified
+        $StatesToProcess = @($State | ForEach-Object { $CurrentValue = $_; $SupportedStates | Where-Object { $_ -eq $CurrentValue } } | Select-Object -Unique)
 
     }
 
-    Write-Output "Log file path is $CertLogFilePath."
-    Write-Verbose 'Executing the following command...'
+    # Format the date for certutil.exe using the current culture so the restriction is interpreted correctly on the local system
+    $RestrictDate = $Date.ToString('d', [System.Globalization.CultureInfo]::CurrentCulture)
 
-    If ($PSBoundParameters['Template']) {
+    # All log files created during this run share the same timestamp
+    $TimeStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-        # Select certificates matching a specific template
-        Write-Verbose "Query: certutil.exe -view -restrict 'Certificate Template=$Template,Disposition=$Disposition,$DateFilterField<=$Date' -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition'"
-        Invoke-Command -ScriptBlock { certutil.exe -view -restrict "Certificate Template=$Template,Disposition=$Disposition,$DateFilterField<=$Date" -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition' | Out-File $CertLogFilePath }
+    $OutColumns = 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition,CertificateTemplate,SerialNumber,CertificateHash'
 
-    }
+    If (-Not $Delete) {
 
-    Else {
-
-        # Select certificates matching any template
-        Write-Verbose "Query: certutil.exe -view -restrict 'Disposition=$Disposition,$DateFilterField<=$Date' -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition'"
-        Invoke-Command -ScriptBlock { certutil.exe -view -restrict "Disposition=$Disposition,$DateFilterField<=$Date" -Out 'Request.RequestID,Request.RequesterName,Request.SubmittedWhen,NotBefore,NotAfter,Request.Disposition' | Out-File $CertLogFilePath }
+        Write-Warning "'$($MyInvocation.MyCommand.Name)' is in view only mode. Use the -Delete parameter to delete CA database entries."
 
     }
 
-    Write-Verbose 'Processing temporary file...'
-    $MatchingRequestIDCollection = (Select-String -Path $CertLogFilePath -SimpleMatch "Request ID:" | Select-Object line)
+    ForEach ($CurrentState in $StatesToProcess) {
 
-    If ($Null -eq $MatchingRequestIDCollection) {
+        Switch ($CurrentState) {
 
-        Write-Warning 'No entries to delete from the CA database.'
-        Break
+            'Issued' {
 
-    }
-
-    Else {
-
-        Write-Output "Number of entries to delete from CA database: $($MatchingRequestIDCollection.Count)."
-
-    }
-
-    # Delete expired certificates
-    $EntryDeletedCount = 0
-
-    # Filter out the HEX part of "Request ID: 0xb (11)"  => "0xb"
-    $MatchingRequestIDCollection | ForEach-Object {
-
-        $ReqIDHex = $_.Line -Replace "(\s*Request\sID\:\s)(0x[a-f|0-9]+)(.*)", '$2'
-
-        Try {
-
-            $IDDec = [int]$ReqIDHex
-            If ($Delete) {
-
-                Write-Output "Executing command: `"certutil.exe -deleterow $ReqIDHex`" (Request ID $IDDec)"
-                & certutil.exe -deleterow $ReqIDHex
+                $Disposition = '20'
+                $DateFilterField = 'NotAfter'
 
             }
 
-            $EntryDeletedCount ++
+            'Revoked' {
+
+                $Disposition = '21'
+                $DateFilterField = 'NotAfter'
+
+            }
+
+            'Failed' {
+
+                $Disposition = '30'
+                $DateFilterField = 'Request.SubmittedWhen'
+
+            }
+
+            'Denied' {
+
+                $Disposition = '31'
+                $DateFilterField = 'Request.SubmittedWhen'
+
+            }
 
         }
 
-        Catch {
+        Write-Verbose "`$State = $CurrentState"
+        Write-Verbose "`$Date = $RestrictDate"
+        Write-Verbose "`$Disposition = $Disposition"
 
-            Write-Output 'Error deleting CA database record.'
+        # Create the log file folder if it doesn't already exist. -WhatIf is explicitly overridden because creating the log folder is required to record the matching entries during a -WhatIf pass
+        $StateLogFolder = Join-Path -Path $LogFilePath -ChildPath $CurrentState
+
+        If (-Not (Test-Path -LiteralPath $StateLogFolder)) {
+
+            New-Item -Path $StateLogFolder -ItemType Directory -Force -WhatIf:$False | Out-Null
 
         }
 
-    }
+        If ($Delete) {
 
-    If ($Delete) {
+            $CertLogFilePath = Join-Path -Path $StateLogFolder -ChildPath "RequestID-$CurrentState-Deleted-$TimeStamp.txt"
 
-        Write-Output "Number of deleted records: $EntryDeletedCount."
+        }
+
+        Else {
+
+            $CertLogFilePath = Join-Path -Path $StateLogFolder -ChildPath "RequestID-$CurrentState-ViewOnly-$TimeStamp.txt"
+
+        }
+
+        Write-Verbose "Log file path is $CertLogFilePath."
+
+        If ($PSBoundParameters['Template']) {
+
+            # Select certificates matching a specific template
+            $Restrict = "Certificate Template=$Template,Disposition=$Disposition,$DateFilterField<=$RestrictDate"
+
+        }
+
+        Else {
+
+            # Select certificates matching any template
+            $Restrict = "Disposition=$Disposition,$DateFilterField<=$RestrictDate"
+
+        }
+
+        Write-Verbose "Query: certutil.exe -view -restrict '$Restrict' -Out '$OutColumns'"
+        & certutil.exe -view -restrict $Restrict -Out $OutColumns | Out-File -FilePath $CertLogFilePath -WhatIf:$False
+
+        If ($LASTEXITCODE -ne 0) {
+
+            Write-Warning "The certutil.exe database query for the $CurrentState state failed with exit code $LASTEXITCODE. Verify this server is a certification authority and the query restriction is valid. Skipping this state."
+            Continue
+
+        }
+
+        # certutil.exe writes certificate hash values with a space between each byte. Remove the spaces so thumbprints can be copied directly from the log file
+        $LogContent = Get-Content -LiteralPath $CertLogFilePath | ForEach-Object {
+
+            If ($_ -Match '^(\s*Certificate Hash:\s*")([^"]*)(".*)$') {
+
+                $Matches[1] + ($Matches[2] -Replace '\s', '') + $Matches[3]
+
+            }
+
+            Else {
+
+                $_
+
+            }
+
+        }
+
+        Set-Content -LiteralPath $CertLogFilePath -Value $LogContent -WhatIf:$False
+
+        If ($Csv) {
+
+            # Create an additional log file in CSV format for review and reporting. certutil.exe cannot emit both output formats in a single pass, so a second database query is required
+            $CsvLogFilePath = [System.IO.Path]::ChangeExtension($CertLogFilePath, 'csv')
+            Write-Verbose "CSV log file path is $CsvLogFilePath."
+            Write-Verbose "Query: certutil.exe -view -restrict '$Restrict' -Out '$OutColumns' csv"
+            & certutil.exe -view -restrict $Restrict -Out $OutColumns csv | Out-File -FilePath $CsvLogFilePath -WhatIf:$False
+
+            If ($LASTEXITCODE -ne 0) {
+
+                Write-Warning "The certutil.exe CSV database query failed with exit code $LASTEXITCODE. The CSV log file may be missing or incomplete."
+
+            }
+
+            Else {
+
+                # Remove spaces from certificate hash values in the CSV log file
+                $CsvRows = @(Import-Csv -LiteralPath $CsvLogFilePath)
+
+                If ($CsvRows.Count -gt 0) {
+
+                    ForEach ($CsvRow in $CsvRows) {
+
+                        $CsvRow.'Certificate Hash' = $CsvRow.'Certificate Hash' -Replace '\s'
+
+                    }
+
+                    $CsvRows | Export-Csv -LiteralPath $CsvLogFilePath -NoTypeInformation -WhatIf:$False
+
+                }
+
+            }
+
+        }
+
+        Write-Verbose 'Processing log file...'
+        $MatchingRequestIDCollection = @(Select-String -Path $CertLogFilePath -SimpleMatch 'Request ID:')
+
+        $EntryDeletedCount = 0
+        $EntryFailedCount = 0
+
+        If ($MatchingRequestIDCollection.Count -eq 0) {
+
+            Write-Warning "No $CurrentState entries to delete from the CA database."
+
+        }
+
+        Else {
+
+            Write-Verbose "Number of matching entries in the CA database: $($MatchingRequestIDCollection.Count)."
+
+            ForEach ($Entry in $MatchingRequestIDCollection) {
+
+                # Extract the hexadecimal request ID from "Request ID: 0xb (11)" => "0xb"
+                $ReqIDHex = $Entry.Line -Replace '(\s*Request\sID\:\s)(0x[0-9a-f]+)(.*)', '$2'
+
+                Try {
+
+                    $IDDec = [System.Convert]::ToInt64($ReqIDHex, 16)
+
+                }
+
+                Catch {
+
+                    Write-Warning "Unable to parse the request ID from log entry '$($Entry.Line.Trim())'."
+                    $EntryFailedCount++
+                    Continue
+
+                }
+
+                If ($Delete -and $PSCmdlet.ShouldProcess("Request ID $IDDec", 'Delete CA database record')) {
+
+                    Write-Verbose "Executing command: certutil.exe -deleterow $ReqIDHex (Request ID $IDDec)."
+                    & certutil.exe -deleterow $ReqIDHex | Out-Null
+
+                    If ($LASTEXITCODE -eq 0) {
+
+                        $EntryDeletedCount++
+
+                    }
+
+                    Else {
+
+                        Write-Warning "Failed to delete Request ID $IDDec (certutil.exe exit code $LASTEXITCODE)."
+                        $EntryFailedCount++
+
+                    }
+
+                }
+
+            }
+
+            If ($Delete) {
+
+                Write-Verbose "Number of deleted records: $EntryDeletedCount."
+
+            }
+
+        }
+
+        # Output summary for this state
+        [PSCustomObject]@{
+
+            State          = $CurrentState
+            EntriesMatched = $MatchingRequestIDCollection.Count
+            EntriesDeleted = $EntryDeletedCount
+            EntriesFailed  = $EntryFailedCount
+            LogFile        = $CertLogFilePath
+            CsvFile        = If ($Csv) { $CsvLogFilePath } Else { $Null }
+
+        }
 
     }
 
     If ($CompactDatabase) {
 
         # Identify CA database location
-        Write-Verbose 'Identifying certificate services database location...'
+        Write-Verbose 'Identifying the Certificate Services database location...'
 
         Try {
 
-            $DbFolder = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -Name DBDirectory -ErrorAction Stop | Select-Object -ExpandProperty DBDirectory
-            $DbName = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -Name Active -ErrorAction Stop | Select-Object -ExpandProperty Active
+            $Config = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration' -ErrorAction Stop
+            $DbFolder = $Config.DBDirectory
+            $DbName = $Config.Active
             $DbPath = Join-Path -Path $DbFolder -ChildPath "$DbName.edb"
 
         }
@@ -258,40 +442,111 @@ Function Remove-ExpiredCertificate {
 
         Write-Verbose "The Certificate Services database location is `"$DbPath`"."
 
-        # Stop certificate services service
-        Write-Verbose 'Stopping the Certificate Services service...'
+        If (-Not (Test-Path -LiteralPath $DbPath)) {
 
+            Write-Warning "The Certificate Services database file `"$DbPath`" was not found. Database compaction will not be performed."
+            Return
+
+        }
+
+        # Database compaction requires free space at least equal to the database size on the database volume for the temporary defragmented copy
         Try {
 
-            Stop-Service -Name CertSvc -ErrorAction Stop
+            $DbSize = (Get-Item -LiteralPath $DbPath -ErrorAction Stop).Length
+            $DbVolume = [System.IO.Path]::GetPathRoot($DbFolder)
+            $Drive = New-Object -TypeName System.IO.DriveInfo -ArgumentList $DbVolume
+
+            If ($Drive.AvailableFreeSpace -lt $DbSize) {
+
+                Write-Warning "Insufficient free space on volume $DbVolume to compact the database. Required: $([Math]::Round($DbSize / 1GB, 2)) GB. Available: $([Math]::Round($Drive.AvailableFreeSpace / 1GB, 2)) GB. Database compaction will not be performed."
+                Return
+
+            }
 
         }
 
         Catch {
 
-            Write-Warning "Failed to stop the Certificate Services service. $_"
-            Return
+            Write-Warning "Unable to verify free disk space on the database volume. $_"
 
         }
 
-        # Perform integrity check on the certificate services database
-        Write-Verbose 'Performing integrity check on the Certificate Services database...'
+        If ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, 'Stop the Certificate Services service and compact the CA database')) {
 
-        Try {
+            # Stop certificate services service
+            Write-Verbose 'Stopping the Certificate Services service...'
 
-            # Extract CA name from certutil.exe output to construct integrity check log file path
-            $CaName = (certutil.exe -getconfig | Select-String -Pattern '\\(.+?)"' ).Matches.Groups[1].Value
-            $LogFile = ".\$CaName.INTEG.RAW"
+            Try {
 
-            # Perform CA database integrity check
-            Invoke-Command -ScriptBlock { esentutl.exe /g $DbPath }
+                Stop-Service -Name CertSvc -ErrorAction Stop
 
-            If ($LASTEXITCODE -ne 0) {
+            }
 
-                Write-Warning "Database integrity check failed with exit code $LASTEXITCODE. Database compaction will not be performed."
-                Write-Warning "Please review the integrity check log file located at `'$LogFile`' for more information."
+            Catch {
 
-                # Start certificate services service before returning
+                Write-Warning "Failed to stop the Certificate Services service. $_"
+                Return
+
+            }
+
+            Try {
+
+                # Perform integrity check on the certificate services database. The check runs from the log file folder so the integrity check log file is created in a known location
+                $IntegrityLogFile = Join-Path -Path $LogFilePath -ChildPath "$DbName.INTEG.RAW"
+                Write-Verbose 'Performing integrity check on the Certificate Services database...'
+                Push-Location -LiteralPath $LogFilePath
+
+                Try {
+
+                    & esentutl.exe /g $DbPath | Out-Host
+
+                }
+
+                Finally {
+
+                    Pop-Location
+
+                }
+
+                If ($LASTEXITCODE -ne 0) {
+
+                    Write-Warning "Database integrity check failed with exit code $LASTEXITCODE. Database compaction will not be performed."
+                    Write-Warning "Review the integrity check log file located at '$IntegrityLogFile' for more information."
+                    Return
+
+                }
+
+                Write-Verbose 'Database integrity check passed.'
+                Write-Verbose "Removing integrity check log file located at '$IntegrityLogFile'..."
+                Remove-Item -LiteralPath $IntegrityLogFile -ErrorAction SilentlyContinue
+
+                # Compact certificate services database. Compaction runs from the database folder so the temporary defragmented database is created on the database volume
+                Write-Verbose 'Compacting the Certificate Services database...'
+                Push-Location -LiteralPath $DbFolder
+
+                Try {
+
+                    & esentutl.exe /d $DbPath | Out-Host
+
+                }
+
+                Finally {
+
+                    Pop-Location
+
+                }
+
+                If ($LASTEXITCODE -ne 0) {
+
+                    Write-Warning "Database compaction failed with exit code $LASTEXITCODE."
+
+                }
+
+            }
+
+            Finally {
+
+                # Always restart the certificate services service, even if the integrity check or compaction failed
                 Write-Verbose 'Starting the Certificate Services service...'
 
                 Try {
@@ -306,78 +561,7 @@ Function Remove-ExpiredCertificate {
 
                 }
 
-                Return
-
             }
-
-            Else {
-
-                Write-Verbose "Removing integrity check log file located at `'$LogFile`'..."
-                Remove-Item -Path $LogFile -ErrorAction SilentlyContinue
-
-            }
-
-        }
-
-        Catch {
-
-            Write-Warning "Failed to perform integrity check on the Certificate Services database. $_"
-
-            # Start certificate services service before returning
-            Write-Verbose 'Starting the Certificate Services service...'
-
-            Try {
-
-                Start-Service -Name CertSvc -ErrorAction Stop
-
-            }
-
-            Catch {
-
-                Write-Warning "Failed to start the Certificate Services service. $_"
-
-            }
-
-            Return
-
-        }
-
-        Write-Verbose 'Database integrity check passed.'
-
-        # Compact certificate services database
-        Write-Verbose 'Compacting the Certificate Services database...'
-
-        Try {
-
-            Invoke-Command -ScriptBlock { esentutl.exe /d $DbPath }
-
-            If ($LASTEXITCODE -ne 0) {
-
-                Write-Warning "Database compaction completed with exit code $LASTEXITCODE."
-
-            }
-
-        }
-
-        Catch {
-
-            Write-Warning "Failed to compact the Certificate Services database. $_"
-
-        }
-
-        # Start certificate services service
-        Write-Verbose 'Starting the Certificate Services service...'
-
-        Try {
-
-            Start-Service -Name CertSvc -ErrorAction Stop
-
-        }
-
-        Catch {
-
-            Write-Warning "Failed to start the Certificate Services service. $_"
-            Return
 
         }
 
@@ -386,174 +570,201 @@ Function Remove-ExpiredCertificate {
 }
 
 # SIG # Begin signature block
-# MIIf2QYJKoZIhvcNAQcCoIIfyjCCH8YCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIk7AYJKoZIhvcNAQcCoIIk3TCCJNkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCKtqtKfOs5DJGh
-# dbgiJ8ObVGGUs7J6XjRMrPIJ/BAvwaCCGpkwggNZMIIC36ADAgECAhAPuKdAuRWN
-# A1FDvFnZ8EApMAoGCCqGSM49BAMDMGExCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
-# aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xIDAeBgNVBAMT
-# F0RpZ2lDZXJ0IEdsb2JhbCBSb290IEczMB4XDTIxMDQyOTAwMDAwMFoXDTM2MDQy
-# ODIzNTk1OVowZDELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMu
-# MTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9iYWwgRzMgQ29kZSBTaWduaW5nIEVDQyBT
-# SEEzODQgMjAyMSBDQTEwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAS7tKwnpUgNolNf
-# jy6BPi9TdrgIlKKaqoqLmLWx8PwqFbu5s6UiL/1qwL3iVWhga5c0wWZTcSP8GtXK
-# IA8CQKKjSlpGo5FTK5XyA+mrptOHdi/nZJ+eNVH8w2M1eHbk+HejggFXMIIBUzAS
-# BgNVHRMBAf8ECDAGAQH/AgEAMB0GA1UdDgQWBBSbX7A2up0GrhknvcCgIsCLizh3
-# 7TAfBgNVHSMEGDAWgBSz20ik+aHF2K42QcwRY2liKbxLxjAOBgNVHQ8BAf8EBAMC
-# AYYwEwYDVR0lBAwwCgYIKwYBBQUHAwMwdgYIKwYBBQUHAQEEajBoMCQGCCsGAQUF
-# BzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQAYIKwYBBQUHMAKGNGh0dHA6
-# Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEdsb2JhbFJvb3RHMy5jcnQw
-# QgYDVR0fBDswOTA3oDWgM4YxaHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lD
-# ZXJ0R2xvYmFsUm9vdEczLmNybDAcBgNVHSAEFTATMAcGBWeBDAEDMAgGBmeBDAEE
-# ATAKBggqhkjOPQQDAwNoADBlAjB4vUmVZXEB0EZXaGUOaKncNgjB7v3UjttAZT8N
-# /5Ovwq5jhqN+y7SRWnjsBwNnB3wCMQDnnx/xB1usNMY4vLWlUM7m6jh+PnmQ5KRb
-# qwIN6Af8VqZait2zULLd8vpmdJ7QFmMwggP+MIIDhKADAgECAhANSjTahpCPwBMs
-# vIE3k68kMAoGCCqGSM49BAMDMGQxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdp
-# Q2VydCwgSW5jLjE8MDoGA1UEAxMzRGlnaUNlcnQgR2xvYmFsIEczIENvZGUgU2ln
-# bmluZyBFQ0MgU0hBMzg0IDIwMjEgQ0ExMB4XDTI0MTIwNjAwMDAwMFoXDTI3MTIy
-# NDIzNTk1OVowgYYxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYw
-# FAYDVQQHEw1NaXNzaW9uIFZpZWpvMSQwIgYDVQQKExtSaWNoYXJkIE0uIEhpY2tz
-# IENvbnN1bHRpbmcxJDAiBgNVBAMTG1JpY2hhcmQgTS4gSGlja3MgQ29uc3VsdGlu
-# ZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABFCbtcqpc7vGGM4hVM79U+7f0tKz
-# o8BAGMJ/0E7JUwKJfyMJj9jsCNpp61+mBNdTwirEm/K0Vz02vak0Ftcb/3yjggHz
-# MIIB7zAfBgNVHSMEGDAWgBSbX7A2up0GrhknvcCgIsCLizh37TAdBgNVHQ4EFgQU
-# KIMkVkfISNUyQJ7bwvLm9sCIkxgwPgYDVR0gBDcwNTAzBgZngQwBBAEwKTAnBggr
-# BgEFBQcCARYbaHR0cDovL3d3dy5kaWdpY2VydC5jb20vQ1BTMA4GA1UdDwEB/wQE
-# AwIHgDATBgNVHSUEDDAKBggrBgEFBQcDAzCBqwYDVR0fBIGjMIGgME6gTKBKhkho
-# dHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRHbG9iYWxHM0NvZGVTaWdu
-# aW5nRUNDU0hBMzg0MjAyMUNBMS5jcmwwTqBMoEqGSGh0dHA6Ly9jcmw0LmRpZ2lj
-# ZXJ0LmNvbS9EaWdpQ2VydEdsb2JhbEczQ29kZVNpZ25pbmdFQ0NTSEEzODQyMDIx
-# Q0ExLmNybDCBjgYIKwYBBQUHAQEEgYEwfzAkBggrBgEFBQcwAYYYaHR0cDovL29j
-# c3AuZGlnaWNlcnQuY29tMFcGCCsGAQUFBzAChktodHRwOi8vY2FjZXJ0cy5kaWdp
-# Y2VydC5jb20vRGlnaUNlcnRHbG9iYWxHM0NvZGVTaWduaW5nRUNDU0hBMzg0MjAy
-# MUNBMS5jcnQwCQYDVR0TBAIwADAKBggqhkjOPQQDAwNoADBlAjBMOsBb80qx6E6S
-# 2lnnHafuyY2paoDtPjcfddKaB1HKnAy7WLaEVc78xAC84iW3l6ECMQDhOPD5JHtw
-# YxEH6DxVDle5pLKfuyQHiY1i0I9PrSn1plPUeZDTnYKmms1P66nBvCkwggWNMIIE
-# daADAgECAhAOmxiO+dAt5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNV
-# BAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdp
-# Y2VydC5jb20xJDAiBgNVBAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAe
-# Fw0yMjA4MDEwMDAwMDBaFw0zMTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUw
-# EwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20x
-# ITAfBgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcN
-# AQEBBQADggIPADCCAgoCggIBAL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC
-# 4SmnPVirdprNrnsbhA3EMB/zG6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWl
-# fr6fqVcWWVVyr2iTcMKyunWZanMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1j
-# KS3O7F5OyJP4IWGbNOsFxl7sWxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dP
-# pzDZVu7Ke13jrclPXuU15zHL2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3
-# pC4FfYj1gj4QkXCrVYJBMtfbBHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJ
-# pMLmqaBn3aQnvKFPObURWBf3JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aa
-# dMreSx7nDmOu5tTvkpI6nj3cAORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXD
-# j/chsrIRt7t/8tWMcCxBYKqxYxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB
-# 4Q+UDCEdslQpJYls5Q5SUUd0viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ
-# 33xMdT9j7CFfxCBRa2+xq4aLT8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amy
-# HeUbAgMBAAGjggE6MIIBNjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC
-# 0nFdZEzfLmc/57qYrhwPTzAfBgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823I
-# DzAOBgNVHQ8BAf8EBAMCAYYweQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhho
-# dHRwOi8vb2NzcC5kaWdpY2VydC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNl
-# cnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYD
-# VR0fBD4wPDA6oDigNoY0aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0
-# QXNzdXJlZElEUm9vdENBLmNybDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcN
-# AQEMBQADggEBAHCgv0NcVec4X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxpp
-# VCLtpIh3bb0aFPQTSnovLbc47/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6
-# mouyXtTP0UNEm0Mh65ZyoUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPH
-# h6jSTEAZNUZqaVSwuKFWjuyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCN
-# NWAcAgPLILCsWKAOQGPFmCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg6
-# 2fC2h5b9W9FcrBjDTZ9ztwGpn1eqXijiuZQwgga0MIIEnKADAgECAhANx6xXBf8h
-# mS5AQyIMOkmGMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
-# EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNV
-# BAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBaFw0z
-# ODAxMTQyMzU5NTlaMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwg
-# SW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcg
-# UlNBNDA5NiBTSEEyNTYgMjAyNSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAw
-# ggIKAoICAQC0eDHTCphBcr48RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1DahGP
-# NRcybEKq+RuwOnPhof6pvF4uGjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn5B1I
-# pYzTqpyFQ/4Bt0mAxAHeHYNnQxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLuxBG5A
-# vftBdsOECS1UkxBvMgEdgkFiDNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3IfDRe
-# b6e3mmdglTcaarps0wjUjsZvkgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cVFBUR
-# Jg6zMUjZa/zbCclF83bRVFLeGkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQT/ao
-# fEnS5xLrfxnGpTXiUOeSLsJygoLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gbylsXQ
-# skBBBnGy3tW/AMOMCZIVNSaz7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rKWDEJ
-# lIqLXvJWnY0v5ydPpOjL6s36czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6z1ev
-# +7psNOdgJMoiwOrUG2ZdSoQbU2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9VnePs6B
-# aaeEWvjJSjNm2qA+sdFUeEY0qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQABo4IB
-# XTCCAVkwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6yuKQ
-# VvYv1Ensy04wHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0P
-# AQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAk
-# BggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAC
-# hjVodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9v
-# dEc0LmNydDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5j
-# b20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEE
-# AjALBglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2cTC9
-# vgvItTSmf83Qh8WIGjB/T8ObXAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe36zwb
-# SI/mS83afsl3YTj+IQhQE7jU/kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMDPjTL
-# xLgXf9r5nWMQwr8Myb9rEVKChHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2AIMD
-# 8liyrukZ2iA/wdG2th9y1IsA0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410ANVk
-# o43+Cdmu4y81hjajV/gxdEkMx1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47OvgRa
-# Ps+2ykgcGV00TYr2Lr3ty9qIijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39OlV8
-# cipDoq7+qNNjqFzeGxcytL5TTLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9vODRz
-# W6AxnJll38F0cuJG7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KC
-# LPAlZ66RzIg9sC+NJpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau
-# 1j/1MIDpMPx0LckTetiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPS
-# xyZsq8WhbaM2tszWkPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0
-# aDANBgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNl
-# cnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1w
-# aW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2
-# MDkwMzIzNTk1OVowYzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJ
-# bmMuMTswOQYDVQQDEzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAg
-# UmVzcG9uZGVyIDIwMjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIB
-# ANBGrC0Sxp7Q6q5gVrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdw
-# bHwBSOeLpvPnZ8ZN+vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9
-# RJt/4QhguSssp3qome7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrU
-# cCV3K3E0zz09ldQ//nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iU
-# SROUINDT98oksouTMYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw
-# 2YD3w6ySSSu+3qU8DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe4
-# 6YceNA0LfNsnqcnpJeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seA
-# O+6d2sC26/PQPdP51ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSH
-# lq8xymLnjCbSLZ49kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6
-# EaJ+AliL7ojTdS5PWPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDch
-# Ic2bQhpp0IoKRR7YufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAM
-# BgNVHRMBAf8EAjAAMB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNV
-# HSMEGDAWgBTvb1NK6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYD
-# VR0lAQH/BAwwCgYIKwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUF
-# BzABhhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6
-# Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFt
-# cGluZ1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5o
-# dHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3Rh
-# bXBpbmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwB
-# BAIwCwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezR
-# CESeY0ByIfjk9iJP2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0
-# k8FUFqNh+tshgb4O6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFO
-# tj7YMTmqPO9mzskgiC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLW
-# U0ziTN6R3ygQBHMUBaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2n
-# HkX/QqvXnNb+YkDFkxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIF
-# eRlqAcuEVT0cKsb+zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqR
-# hoS3Y50OHgaY7T/lwd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7
-# roancJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47Cdx
-# VRd/ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/r
-# ptb7IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL
-# 6vdCvHlshtjdNXOCIUjsarfNZzGCBJYwggSSAgEBMHgwZDELMAkGA1UEBhMCVVMx
-# FzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMTwwOgYDVQQDEzNEaWdpQ2VydCBHbG9i
-# YWwgRzMgQ29kZSBTaWduaW5nIEVDQyBTSEEzODQgMjAyMSBDQTECEA1KNNqGkI/A
-# Eyy8gTeTryQwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGCNwIBDDEKMAigAoAA
-# oQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgorBgEEAYI3AgELMQ4w
-# DAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgeK6lz71RPqiwvs2/k6dWNgQA
-# SJcam0Z7prtCRwu0jAMwCwYHKoZIzj0CAQUABEYwRAIgEpbpi1YzTT4B509g3uXs
-# q6A9qZ/+COY4MaRk9aoAAbkCIGM1bi982sbqExnDfquRcbtPvTw2pBnc16X/51zY
-# K9f2oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UEBhMC
-# VVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBU
-# cnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENBMQIQ
-# CoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJAzEL
-# BgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDIyMDAwNTkyOFowLwYJKoZI
-# hvcNAQkEMSIEIOfpO+JlMNzhQVHeR7hPstpTgarVPQLPjAnZNT2uEKaCMA0GCSqG
-# SIb3DQEBAQUABIICAAn33SBVA6X8IA5CbwEBWBPRehCupc99ycGzlQkNNWO5mRYm
-# wlRJNDJgCD5vhH7bpKQikqSbMU0LLTkWiPBsxEoeZ/lN6XXYCUpvsxQuAt51iObn
-# mGCiIoCqjis86ZLw4xJ3lRH/ynGrGr/m593/ne54jmpWFOvKfuJv3GYQ0Pmm2Ak+
-# 5U3u2bSVlZkoC3B2CYsW4c0OVgs69bK6K8CIdBCQQNJQ1EtNTQhEBXy+bgccajDo
-# d0OwyCcudPUK63qSYe0p1v2RCH0Jt/CT0tHQW3Msi2ClbxwOnD/nHFHlvHefjP0O
-# AiFuxALfs1UUgfZFFAQdmlG9J8ipwip2oyC8ELrOUcHq80NqxiCNwNosJd5n+vmt
-# SuN0mKjxdYyJXRYuOW6rF+A6yRdAtvHg0R4Sky+2gtPs8oXSXCN9Q9I8NsAeXc22
-# hI0W7eLDzwKjI08q4oIlfHkRZZM3BOcwzu7WWv38MeXJccHPBI86x7fqSOm+/Uq7
-# efskzArfM/QUHbOk4cs1TftiQs14d8eliV0Hv7CRAUhbX4x4Ii3RSQhKkz1Znpg4
-# gPMyrrSOnuaBzWQ9Vn9x5MqCBIFyPhRayEZG6I8ZCil0PHM+ukJSXx2irr9dtpnJ
-# TebK+6QwFBHf3GLQln1YWznnlwTNsnFy2xMRrAsvNQnyhNSV27WuHeCkwXVn
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeg9CpzO33ybiU
+# N6ivtuaOOrOMb4B/3ljqlWymCVgRjaCCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
+# EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
+# BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
+# Fw0zMTExMDkyMzU5NTlaMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2Vy
+# dCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMTGERpZ2lD
+# ZXJ0IFRydXN0ZWQgUm9vdCBHNDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoC
+# ggIBAL/mkHNo3rvkXUo8MCIwaTPswqclLskhPfKK2FnC4SmnPVirdprNrnsbhA3E
+# MB/zG6Q4FutWxpdtHauyefLKEdLkX9YFPFIPUh/GnhWlfr6fqVcWWVVyr2iTcMKy
+# unWZanMylNEQRBAu34LzB4TmdDttceItDBvuINXJIB1jKS3O7F5OyJP4IWGbNOsF
+# xl7sWxq868nPzaw0QF+xembud8hIqGZXV59UWI4MK7dPpzDZVu7Ke13jrclPXuU1
+# 5zHL2pNe3I6PgNq2kZhAkHnDeMe2scS1ahg4AxCN2NQ3pC4FfYj1gj4QkXCrVYJB
+# MtfbBHMqbpEBfCFM1LyuGwN1XXhm2ToxRJozQL8I11pJpMLmqaBn3aQnvKFPObUR
+# WBf3JFxGj2T3wWmIdph2PVldQnaHiZdpekjw4KISG2aadMreSx7nDmOu5tTvkpI6
+# nj3cAORFJYm2mkQZK37AlLTSYW3rM9nF30sEAMx9HJXDj/chsrIRt7t/8tWMcCxB
+# YKqxYxhElRp2Yn72gLD76GSmM9GJB+G9t+ZDpBi4pncB4Q+UDCEdslQpJYls5Q5S
+# UUd0viastkF13nqsX40/ybzTQRESW+UQUOsxxcpyFiIJ33xMdT9j7CFfxCBRa2+x
+# q4aLT8LWRV+dIPyhHsXAj6KxfgommfXkaS+YHS312amyHeUbAgMBAAGjggE6MIIB
+# NjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTs1+OC0nFdZEzfLmc/57qYrhwP
+# TzAfBgNVHSMEGDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzAOBgNVHQ8BAf8EBAMC
+# AYYweQYIKwYBBQUHAQEEbTBrMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdp
+# Y2VydC5jb20wQwYIKwYBBQUHMAKGN2h0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNv
+# bS9EaWdpQ2VydEFzc3VyZWRJRFJvb3RDQS5jcnQwRQYDVR0fBD4wPDA6oDigNoY0
+# aHR0cDovL2NybDMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0QXNzdXJlZElEUm9vdENB
+# LmNybDARBgNVHSAECjAIMAYGBFUdIAAwDQYJKoZIhvcNAQEMBQADggEBAHCgv0Nc
+# Vec4X6CjdBs9thbX979XB72arKGHLOyFXqkauyL4hxppVCLtpIh3bb0aFPQTSnov
+# Lbc47/T/gLn4offyct4kvFIDyE7QKt76LVbP+fT3rDB6mouyXtTP0UNEm0Mh65Zy
+# oUi0mcudT6cGAxN3J0TU53/oWajwvy8LpunyNDzs9wPHh6jSTEAZNUZqaVSwuKFW
+# juyk1T3osdz9HNj0d1pcVIxv76FQPfx2CWiEn2/K2yCNNWAcAgPLILCsWKAOQGPF
+# mCLBsln1VWvPJ6tsds5vIy30fnFqI2si/xK4VC0nftg62fC2h5b9W9FcrBjDTZ9z
+# twGpn1eqXijiuZQwggW0MIIDnKADAgECAhAOxitIKuZQm69NGxw+uiH/MA0GCSqG
+# SIb3DQEBDAUAMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5j
+# LjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBDb2RlIFNpZ25pbmcgUlNB
+# NDA5NiBTSEEzODQgMjAyMSBDQTEwHhcNMjYwNTE2MDAwMDAwWhcNMjcwODE3MjM1
+# OTU5WjCBhjELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExFjAUBgNV
+# BAcTDU1pc3Npb24gVmllam8xJDAiBgNVBAoTG1JpY2hhcmQgTS4gSGlja3MgQ29u
+# c3VsdGluZzEkMCIGA1UEAxMbUmljaGFyZCBNLiBIaWNrcyBDb25zdWx0aW5nMFkw
+# EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEOooTPiege6mCA4AriPO+Xh3mymiiZ+3k
+# kn31uJifB2ojzzfY7VkAVKhgj+rcVBnofnj2b8OhvAJ4YaQ2Iwuc6aOCAgMwggH/
+# MB8GA1UdIwQYMBaAFGg34Ou2O/hfEYb7/mF7CIhl9E5CMB0GA1UdDgQWBBQJvGhl
+# Ahwi6UKROatrFKBmPLmd5TA+BgNVHSAENzA1MDMGBmeBDAEEATApMCcGCCsGAQUF
+# BwIBFhtodHRwOi8vd3d3LmRpZ2ljZXJ0LmNvbS9DUFMwDgYDVR0PAQH/BAQDAgeA
+# MBMGA1UdJQQMMAoGCCsGAQUFBwMDMIG1BgNVHR8Ega0wgaowU6BRoE+GTWh0dHA6
+# Ly9jcmwzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNENvZGVTaWduaW5n
+# UlNBNDA5NlNIQTM4NDIwMjFDQTEuY3JsMFOgUaBPhk1odHRwOi8vY3JsNC5kaWdp
+# Y2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRDb2RlU2lnbmluZ1JTQTQwOTZTSEEz
+# ODQyMDIxQ0ExLmNybDCBlAYIKwYBBQUHAQEEgYcwgYQwJAYIKwYBBQUHMAGGGGh0
+# dHA6Ly9vY3NwLmRpZ2ljZXJ0LmNvbTBcBggrBgEFBQcwAoZQaHR0cDovL2NhY2Vy
+# dHMuZGlnaWNlcnQuY29tL0RpZ2lDZXJ0VHJ1c3RlZEc0Q29kZVNpZ25pbmdSU0E0
+# MDk2U0hBMzg0MjAyMUNBMS5jcnQwCQYDVR0TBAIwADANBgkqhkiG9w0BAQwFAAOC
+# AgEAbaKnnRcJAMHjuWSc2PG/QhJ0jj4hQVwJIbddYDJNxPmD0cxuuorSiR9gX2nl
+# ajqNI9N7Kl+FB3oheRTGh/wp4JgZMpCq0qS0zGJ/N6Js+HmVtbkFaPyYxJMXbIWq
+# p9zKkoXtSXkpR6nGZnzYkn3EBcRlu4R6hIJHzM/C2PUztH/Hd4fGIryyD69iHvKx
+# zotYdlHHY6+X1ACaQnuCz3TLxs3/CDKhPUXesKcISnXHmm4uCwyVdtGyl7wPuZVk
+# +rfCIOeWn+XG5J7L8xwhXCPSJ5fKJ5m8/H5cICLR0I7hI4SUiybE1nG5CZ1hKhbW
+# abSfNer1dHH/vSYi80YGXCej/88vZeCGQ9/rrjugsg0yN7WCPqNKjEMTYGWkrt37
+# lp4cJqULS+alUbL6x1HBdoBStDE2CFmPivL7cCCtnudqCA6b3XB416/FlRo8t4Lw
+# Dc2ty+RDKirWM84Zj3ANTVs5fi43rxClBQwngGdqi5TjriKHGTkEKYRIFTViy6Ie
+# JDIboOkCFJU5vM7Curvh4rQnw+aM4CyjwnDwnzwcKQVZC3Iy1T4h/FvmpSgu5ouM
+# wjdzaR3cSh4OPDRrfBl1YIOoZEOHcshCaHDC46t8+UyAf70BMlrB7Nj84ORTuKTi
+# IlU062VzGeREc1KHJqp/S3/NtArpVUVQEgibRxQ99KJCOV8wggawMIIEmKADAgEC
+# AhAIrUCyYNKcTJ9ezam9k67ZMA0GCSqGSIb3DQEBDAUAMGIxCzAJBgNVBAYTAlVT
+# MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j
+# b20xITAfBgNVBAMTGERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yMTA0Mjkw
+# MDAwMDBaFw0zNjA0MjgyMzU5NTlaMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5E
+# aWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBDb2Rl
+# IFNpZ25pbmcgUlNBNDA5NiBTSEEzODQgMjAyMSBDQTEwggIiMA0GCSqGSIb3DQEB
+# AQUAA4ICDwAwggIKAoICAQDVtC9C0CiteLdd1TlZG7GIQvUzjOs9gZdwxbvEhSYw
+# n6SOaNhc9es0JAfhS0/TeEP0F9ce2vnS1WcaUk8OoVf8iJnBkcyBAz5NcCRks43i
+# CH00fUyAVxJrQ5qZ8sU7H/Lvy0daE6ZMswEgJfMQ04uy+wjwiuCdCcBlp/qYgEk1
+# hz1RGeiQIXhFLqGfLOEYwhrMxe6TSXBCMo/7xuoc82VokaJNTIIRSFJo3hC9FFdd
+# 6BgTZcV/sk+FLEikVoQ11vkunKoAFdE3/hoGlMJ8yOobMubKwvSnowMOdKWvObar
+# YBLj6Na59zHh3K3kGKDYwSNHR7OhD26jq22YBoMbt2pnLdK9RBqSEIGPsDsJ18eb
+# MlrC/2pgVItJwZPt4bRc4G/rJvmM1bL5OBDm6s6R9b7T+2+TYTRcvJNFKIM2KmYo
+# X7BzzosmJQayg9Rc9hUZTO1i4F4z8ujo7AqnsAMrkbI2eb73rQgedaZlzLvjSFDz
+# d5Ea/ttQokbIYViY9XwCFjyDKK05huzUtw1T0PhH5nUwjewwk3YUpltLXXRhTT8S
+# kXbev1jLchApQfDVxW0mdmgRQRNYmtwmKwH0iU1Z23jPgUo+QEdfyYFQc4UQIyFZ
+# YIpkVMHMIRroOBl8ZhzNeDhFMJlP/2NPTLuqDQhTQXxYPUez+rbsjDIJAsxsPAxW
+# EQIDAQABo4IBWTCCAVUwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQUaDfg
+# 67Y7+F8Rhvv+YXsIiGX0TkIwHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4c
+# D08wDgYDVR0PAQH/BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMDMHcGCCsGAQUF
+# BwEBBGswaTAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEG
+# CCsGAQUFBzAChjVodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRU
+# cnVzdGVkUm9vdEc0LmNydDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5k
+# aWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNybDAcBgNVHSAEFTAT
+# MAcGBWeBDAEDMAgGBmeBDAEEATANBgkqhkiG9w0BAQwFAAOCAgEAOiNEPY0Idu6P
+# vDqZ01bgAhql+Eg08yy25nRm95RysQDKr2wwJxMSnpBEn0v9nqN8JtU3vDpdSG2V
+# 1T9J9Ce7FoFFUP2cvbaF4HZ+N3HLIvdaqpDP9ZNq4+sg0dVQeYiaiorBtr2hSBh+
+# 3NiAGhEZGM1hmYFW9snjdufE5BtfQ/g+lP92OT2e1JnPSt0o618moZVYSNUa/tcn
+# P/2Q0XaG3RywYFzzDaju4ImhvTnhOE7abrs2nfvlIVNaw8rpavGiPttDuDPITzgU
+# kpn13c5UbdldAhQfQDN8A+KVssIhdXNSy0bYxDQcoqVLjc1vdjcshT8azibpGL6Q
+# B7BDf5WIIIJw8MzK7/0pNVwfiThV9zeKiwmhywvpMRr/LhlcOXHhvpynCgbWJme3
+# kuZOX956rEnPLqR0kq3bPKSchh/jwVYbKyP/j7XqiHtwa+aguv06P0WmxOgWkVKL
+# QcBIhEuWTatEQOON8BUozu3xGFYHKi8QxAwIZDwzj64ojDzLj4gLDb879M4ee47v
+# tevLt/B3E+bnKD+sEq6lLyJsQfmCXBVmzGwOysWGw/YmMwwHS6DTBwJqakAwSEs0
+# qFEgu60bhQjiWQ1tygVQK+pKHJ6l/aCnHwZ05/LWUpD9r4VIIflXO7ScA+2GRfS0
+# YW6/aOImYIbqyK+p/pQd52MbOoZWeE4wgga0MIIEnKADAgECAhANx6xXBf8hmS5A
+# QyIMOkmGMA0GCSqGSIb3DQEBCwUAMGIxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxE
+# aWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xITAfBgNVBAMT
+# GERpZ2lDZXJ0IFRydXN0ZWQgUm9vdCBHNDAeFw0yNTA1MDcwMDAwMDBaFw0zODAx
+# MTQyMzU5NTlaMGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5j
+# LjFBMD8GA1UEAxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNB
+# NDA5NiBTSEEyNTYgMjAyNSBDQTEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK
+# AoICAQC0eDHTCphBcr48RsAcrHXbo0ZodLRRF51NrY0NlLWZloMsVO1DahGPNRcy
+# bEKq+RuwOnPhof6pvF4uGjwjqNjfEvUi6wuim5bap+0lgloM2zX4kftn5B1IpYzT
+# qpyFQ/4Bt0mAxAHeHYNnQxqXmRinvuNgxVBdJkf77S2uPoCj7GH8BLuxBG5AvftB
+# dsOECS1UkxBvMgEdgkFiDNYiOTx4OtiFcMSkqTtF2hfQz3zQSku2Ws3IfDReb6e3
+# mmdglTcaarps0wjUjsZvkgFkriK9tUKJm/s80FiocSk1VYLZlDwFt+cVFBURJg6z
+# MUjZa/zbCclF83bRVFLeGkuAhHiGPMvSGmhgaTzVyhYn4p0+8y9oHRaQT/aofEnS
+# 5xLrfxnGpTXiUOeSLsJygoLPp66bkDX1ZlAeSpQl92QOMeRxykvq6gbylsXQskBB
+# BnGy3tW/AMOMCZIVNSaz7BX8VtYGqLt9MmeOreGPRdtBx3yGOP+rx3rKWDEJlIqL
+# XvJWnY0v5ydPpOjL6s36czwzsucuoKs7Yk/ehb//Wx+5kMqIMRvUBDx6z1ev+7ps
+# NOdgJMoiwOrUG2ZdSoQbU2rMkpLiQ6bGRinZbI4OLu9BMIFm1UUl9VnePs6BaaeE
+# WvjJSjNm2qA+sdFUeEY0qVjPKOWug/G6X5uAiynM7Bu2ayBjUwIDAQABo4IBXTCC
+# AVkwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU729TSunkBnx6yuKQVvYv
+# 1Ensy04wHwYDVR0jBBgwFoAU7NfjgtJxXWRM3y5nP+e6mK4cD08wDgYDVR0PAQH/
+# BAQDAgGGMBMGA1UdJQQMMAoGCCsGAQUFBwMIMHcGCCsGAQUFBwEBBGswaTAkBggr
+# BgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tMEEGCCsGAQUFBzAChjVo
+# dHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkUm9vdEc0
+# LmNydDBDBgNVHR8EPDA6MDigNqA0hjJodHRwOi8vY3JsMy5kaWdpY2VydC5jb20v
+# RGlnaUNlcnRUcnVzdGVkUm9vdEc0LmNybDAgBgNVHSAEGTAXMAgGBmeBDAEEAjAL
+# BglghkgBhv1sBwEwDQYJKoZIhvcNAQELBQADggIBABfO+xaAHP4HPRF2cTC9vgvI
+# tTSmf83Qh8WIGjB/T8ObXAZz8OjuhUxjaaFdleMM0lBryPTQM2qEJPe36zwbSI/m
+# S83afsl3YTj+IQhQE7jU/kXjjytJgnn0hvrV6hqWGd3rLAUt6vJy9lMDPjTLxLgX
+# f9r5nWMQwr8Myb9rEVKChHyfpzee5kH0F8HABBgr0UdqirZ7bowe9Vj2AIMD8liy
+# rukZ2iA/wdG2th9y1IsA0QF8dTXqvcnTmpfeQh35k5zOCPmSNq1UH410ANVko43+
+# Cdmu4y81hjajV/gxdEkMx1NKU4uHQcKfZxAvBAKqMVuqte69M9J6A47OvgRaPs+2
+# ykgcGV00TYr2Lr3ty9qIijanrUR3anzEwlvzZiiyfTPjLbnFRsjsYg39OlV8cipD
+# oq7+qNNjqFzeGxcytL5TTLL4ZaoBdqbhOhZ3ZRDUphPvSRmMThi0vw9vODRzW6Ax
+# nJll38F0cuJG7uEBYTptMSbhdhGQDpOXgpIUsWTjd6xpR6oaQf/DJbg3s6KCLPAl
+# Z66RzIg9sC+NJpud/v4+7RWsWCiKi9EOLLHfMR2ZyJ/+xhCx9yHbxtl5TPau1j/1
+# MIDpMPx0LckTetiSuEtQvLsNz3Qbp7wGWqbIiOWCnb5WqxL3/BAPvIXKUjPSxyZs
+# q8WhbaM2tszWkPZPubdcMIIG7TCCBNWgAwIBAgIQCoDvGEuN8QWC0cR2p5V0aDAN
+# BgkqhkiG9w0BAQsFADBpMQswCQYDVQQGEwJVUzEXMBUGA1UEChMORGlnaUNlcnQs
+# IEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0IFRydXN0ZWQgRzQgVGltZVN0YW1waW5n
+# IFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0ExMB4XDTI1MDYwNDAwMDAwMFoXDTM2MDkw
+# MzIzNTk1OVowYzELMAkGA1UEBhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMu
+# MTswOQYDVQQDEzJEaWdpQ2VydCBTSEEyNTYgUlNBNDA5NiBUaW1lc3RhbXAgUmVz
+# cG9uZGVyIDIwMjUgMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBANBG
+# rC0Sxp7Q6q5gVrMrV7pvUf+GcAoB38o3zBlCMGMyqJnfFNZx+wvA69HFTBdwbHwB
+# SOeLpvPnZ8ZN+vo8dE2/pPvOx/Vj8TchTySA2R4QKpVD7dvNZh6wW2R6kSu9RJt/
+# 4QhguSssp3qome7MrxVyfQO9sMx6ZAWjFDYOzDi8SOhPUWlLnh00Cll8pjrUcCV3
+# K3E0zz09ldQ//nBZZREr4h/GI6Dxb2UoyrN0ijtUDVHRXdmncOOMA3CoB/iUSROU
+# INDT98oksouTMYFOnHoRh6+86Ltc5zjPKHW5KqCvpSduSwhwUmotuQhcg9tw2YD3
+# w6ySSSu+3qU8DD+nigNJFmt6LAHvH3KSuNLoZLc1Hf2JNMVL4Q1OpbybpMe46Yce
+# NA0LfNsnqcnpJeItK/DhKbPxTTuGoX7wJNdoRORVbPR1VVnDuSeHVZlc4seAO+6d
+# 2sC26/PQPdP51ho1zBp+xUIZkpSFA8vWdoUoHLWnqWU3dCCyFG1roSrgHjSHlq8x
+# ymLnjCbSLZ49kPmk8iyyizNDIXj//cOgrY7rlRyTlaCCfw7aSUROwnu7zER6EaJ+
+# AliL7ojTdS5PWPsWeupWs7NpChUk555K096V1hE0yZIXe+giAwW00aHzrDchIc2b
+# Qhpp0IoKRR7YufAkprxMiXAJQ1XCmnCfgPf8+3mnAgMBAAGjggGVMIIBkTAMBgNV
+# HRMBAf8EAjAAMB0GA1UdDgQWBBTkO/zyMe39/dfzkXFjGVBDz2GM6DAfBgNVHSME
+# GDAWgBTvb1NK6eQGfHrK4pBW9i/USezLTjAOBgNVHQ8BAf8EBAMCB4AwFgYDVR0l
+# AQH/BAwwCgYIKwYBBQUHAwgwgZUGCCsGAQUFBwEBBIGIMIGFMCQGCCsGAQUFBzAB
+# hhhodHRwOi8vb2NzcC5kaWdpY2VydC5jb20wXQYIKwYBBQUHMAKGUWh0dHA6Ly9j
+# YWNlcnRzLmRpZ2ljZXJ0LmNvbS9EaWdpQ2VydFRydXN0ZWRHNFRpbWVTdGFtcGlu
+# Z1JTQTQwOTZTSEEyNTYyMDI1Q0ExLmNydDBfBgNVHR8EWDBWMFSgUqBQhk5odHRw
+# Oi8vY3JsMy5kaWdpY2VydC5jb20vRGlnaUNlcnRUcnVzdGVkRzRUaW1lU3RhbXBp
+# bmdSU0E0MDk2U0hBMjU2MjAyNUNBMS5jcmwwIAYDVR0gBBkwFzAIBgZngQwBBAIw
+# CwYJYIZIAYb9bAcBMA0GCSqGSIb3DQEBCwUAA4ICAQBlKq3xHCcEua5gQezRCESe
+# Y0ByIfjk9iJP2zWLpQq1b4URGnwWBdEZD9gBq9fNaNmFj6Eh8/YmRDfxT7C0k8FU
+# FqNh+tshgb4O6Lgjg8K8elC4+oWCqnU/ML9lFfim8/9yJmZSe2F8AQ/UdKFOtj7Y
+# MTmqPO9mzskgiC3QYIUP2S3HQvHG1FDu+WUqW4daIqToXFE/JQ/EABgfZXLWU0zi
+# TN6R3ygQBHMUBaB5bdrPbF6MRYs03h4obEMnxYOX8VBRKe1uNnzQVTeLni2nHkX/
+# QqvXnNb+YkDFkxUGtMTaiLR9wjxUxu2hECZpqyU1d0IbX6Wq8/gVutDojBIFeRlq
+# AcuEVT0cKsb+zJNEsuEB7O7/cuvTQasnM9AWcIQfVjnzrvwiCZ85EE8LUkqRhoS3
+# Y50OHgaY7T/lwd6UArb+BOVAkg2oOvol/DJgddJ35XTxfUlQ+8Hggt8l2Yv7roan
+# cJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/
+# ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7
+# IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdC
+# vHlshtjdNXOCIUjsarfNZzGCBJwwggSYAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
+# BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVk
+# IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
+# UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
+# gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCS8LftlKZRzJYVeBRv3dm9
+# tFNnTSybbrmZA+naay/JfTALBgcqhkjOPQIBBQAERzBFAiEA7yaiW40QfmxuymAi
+# BJH9BRrlcdUXLnPB3DQ2+KXoab4CIFnDF4E9DLpWRBfJuuKvYLXSdFGwnvsoLJmR
+# z2w6SxtXoYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
+# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2Vy
+# dCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENB
+# MQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJ
+# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcyNzA0MDI1NVowLwYJ
+# KoZIhvcNAQkEMSIEIFHaVeWedWgwZrHX9NF4T8UpLwl3WxSBX1KLO3TpikkZMA0G
+# CSqGSIb3DQEBAQUABIICAJxVH90qVdM2eumo0w6DCZ7juRZxFt/weULUj3J8NWw2
+# oog5hQPvOsPFEcBaeYbAeFcYdo6b6gArKLm3aCaMMYLrlmkifz/Xgykcf5VCMpPl
+# lEch6MRI4IPWwdzR7RHHkxSzvnHluH4MHOV90Yfswvdf92vhKPmqFr+Y5khkW2Er
+# ml9i45AZL0hzzbFvAOYRXxp12JAmCEiVzntH/sINJLZVPhjxoIoRwjj4ZoqYafmo
+# Pp8HqEA8lurHUmvuzpcJBmR0jO/L4q5vbGlQ2YUWGAyzrkAdcKgotlwwy1Ge6B+4
+# GSgb+EC6QTi+fjmaHKQTGfq+hG7vZqeJIxA8TTunysTmEqhAg9HoRAlmtLxkAE7k
+# uMyHMWd5ZV7eQ+YJmx8/BsLVf7k5G1H2Vgxw6PPH7V37zeJhjTIhAupot0KZQJNS
+# 6iZUk08MvvUfYh10z85TFhN57IqH1omBVoR3/5g8TzXsYCd7Du5Q/w3wJwKRr+tM
+# BMNcNCu8/O4dkBs0oDNlMAabZHIIcC2W2m5QE80mxIdOM5GElP+C6MMLO59ZCPVg
+# cgHtFZGLvWxu9CmqpQtmKnO9Pz+edIyquCPRxcZKCNDA89UJQnA5MxUU7kg6+RMN
+# fYU99d8oMa/YH3PWgC3vKKDQUdwR3rBb5auvjMTbSeQ58Om6QUra8lXijQSxUU0i
 # SIG # End signature block

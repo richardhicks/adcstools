@@ -1,56 +1,27 @@
 <#
 
 .SYNOPSIS
-    Retrieve certificate templates from Active Directory and return their names, display names, and OIDs.
-
-.PARAMETER Name
-    The name of the certificate template to retrieve. Accepts wildcards and matches against the template name, display name, or OID. If omitted, all certificate templates are returned.
-
-.PARAMETER Server
-    The fully qualified domain name (FQDN) of a specific domain controller or domain to query. If omitted, the default domain of the current session is used.
-
-.PARAMETER Credential
-    Alternate credentials to use when querying Active Directory. If omitted, the credentials of the current session are used.
-
-.EXAMPLE
-    Get-ADCertificateTemplate
-
-    Retrieves all certificate templates from Active Directory and returns their names, display names, and OIDs.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name 'LabWebServer'
-
-    Retrieves the certificate template named LabWebServer.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name 'LabNdes*'
-
-    Retrieves all certificate templates with names or display names beginning with LabNdes.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Name '1.3.6.1.4.1.311.21.8.16187918.14945684.15749023.11519519.4925321.197.13392998.8282280'
-
-    Retrieves the certificate template with the specified OID.
-
-.EXAMPLE
-    Get-ADCertificateTemplate -Server 'dc1.corp.example.net' -Credential (Get-Credential)
-
-    Retrieves all certificate templates from the specified domain controller using alternate credentials.
+    Determine if the current PowerShell session is running with administrative privileges.
 
 .DESCRIPTION
-    This function retrieves certificate templates from Active Directory and returns their names, display names, and OIDs, which can be helpful for troubleshooting certificate enrollment issues. The function queries the Certificate Templates container in the Configuration partition of Active Directory and emits a custom object for each template to the pipeline, sorted alphabetically by template name. The output can be filtered, formatted, or exported like any other PowerShell object.
+    Returns True if the current PowerShell session is running elevated (as an administrator), otherwise returns False.
 
-.OUTPUTS
-    PSCustomObject. One object per certificate template with the properties TemplateName, TemplateDisplayName, and TemplateOID.
+    This is an internal helper function used by other functions in the ADCSTools module. It is intentionally not exported in the module manifest.
+
+.EXAMPLE
+    Test-IsElevated
+
+    Running this PowerShell command will return True if the current session is elevated.
 
 .LINK
-    https://github.com/richardhicks/adcstools/blob/main/Functions/Get-ADCertificateTemplate.ps1
+    https://github.com/richardhicks/adcstools/blob/main/Functions/Test-IsElevated.ps1
+
+.LINK
+    https://www.richardhicks.com/
 
 .NOTES
-    This function requires the ActiveDirectory PowerShell module, available as part of the Remote Server Administration Tools (RSAT).
-
     Version:        3.0
-    Creation Date:  February 29, 2024
+    Creation Date:  July 26, 2026
     Last Updated:   July 26, 2026
     Author:         Richard Hicks
     Organization:   Richard M. Hicks Consulting, Inc.
@@ -59,89 +30,24 @@
 
 #>
 
-Function Get-ADCertificateTemplate {
+Function Test-IsElevated {
 
     [CmdletBinding()]
-    [OutputType([PSCustomObject])]
+    [OutputType([System.Boolean])]
 
     Param (
 
-        [Parameter(Position = 0)]
-        [SupportsWildcards()]
-        [String]$Name = '*',
-        [String]$Server,
-        [PSCredential]$Credential
-
     )
 
-    # Build a common set of parameters for all Active Directory cmdlet calls
-    $AdParams = @{
-
-        ErrorAction = 'Stop'
-
-    }
-
-    If ($Server) {
-
-        $AdParams['Server'] = $Server
-
-    }
-
-    If ($Credential) {
-
-        $AdParams['Credential'] = $Credential
-
-    }
-
-    Try {
-
-        $RootDSE = Get-ADRootDSE @AdParams
-
-    }
-
-    Catch {
-
-        Throw "Unable to contact Active Directory. Ensure the ActiveDirectory PowerShell module (RSAT) is installed and a domain controller is reachable. Underlying error: $($_.Exception.Message)"
-
-    }
-
-    # Specify the distinguished name of the Certificate Templates container
-    $PkiContainerDN = "CN=Certificate Templates,CN=Public Key Services,CN=Services,$($RootDSE.ConfigurationNamingContext)"
-    Write-Verbose "Container path is $PkiContainerDN."
-
-    Try {
-
-        # Retrieve all certificate template objects from the Certificate Templates container. Name, DisplayName, and OID matching is performed client-side to avoid quoting issues when interpolating user input into an AD filter string.
-        Get-ADObject @AdParams -SearchBase $PkiContainerDN -SearchScope OneLevel -Filter "objectClass -eq 'pKICertificateTemplate'" -Properties 'msPKI-Cert-Template-OID', 'DisplayName' |
-        Where-Object { $_.Name -like $Name -or $_.DisplayName -like $Name -or $_.'msPKI-Cert-Template-OID' -like $Name } |
-        Sort-Object -Property Name |
-        ForEach-Object {
-
-            [PSCustomObject]@{
-
-                TemplateName        = $_.Name
-                TemplateDisplayName = $_.DisplayName
-                TemplateOID         = $_.'msPKI-Cert-Template-OID'
-
-            }
-
-        }
-
-    }
-
-    Catch {
-
-        Throw "Failed to query certificate templates from $PkiContainerDN. Underlying error: $($_.Exception.Message)"
-
-    }
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 }
 
 # SIG # Begin signature block
-# MIIk6wYJKoZIhvcNAQcCoIIk3DCCJNgCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MIIk7AYJKoZIhvcNAQcCoIIk3TCCJNkCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCD7uxbi0vDebKfY
-# ayIw684/72epV3MKBVz9WIHi2KUg66CCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlrdFMWqUFlCCq
+# rvdFfj3VT2SLIknoTN5NJmOxfLVlt6CCH6YwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -310,29 +216,29 @@ Function Get-ADCertificateTemplate {
 # cJIFcbojBcxlRcGG0LIhp6GvReQGgMgYxQbV1S3CrWqZzBt1R9xJgKf47CdxVRd/
 # ndUlQ05oxYy2zRWVFjF7mcr4C34Mj3ocCVccAvlKV9jEnstrniLvUxxVZE/rptb7
 # IRE2lskKPIJgbaP5t2nGj/ULLi49xTcBZU8atufk+EMF/cWuiC7POGT75qaL6vdC
-# vHlshtjdNXOCIUjsarfNZzGCBJswggSXAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
+# vHlshtjdNXOCIUjsarfNZzGCBJwwggSYAgEBMH0waTELMAkGA1UEBhMCVVMxFzAV
 # BgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2VydCBUcnVzdGVk
 # IEc0IENvZGUgU2lnbmluZyBSU0E0MDk2IFNIQTM4NCAyMDIxIENBMQIQDsYrSCrm
 # UJuvTRscProh/zANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCAOvG7TOyHUDHEMUcfN63o
-# 5NIfTJTlpykakUd8Yapl5jALBgcqhkjOPQIBBQAERjBEAiB/5WIUnHGdl7M0RrRB
-# bmeB42rE7EwlcrpbCKsjZjH6+wIgWkjE2LL2DSx4ewhBI1zga1mct0ZCZN3GxDRm
-# yrfj8kOhggMmMIIDIgYJKoZIhvcNAQkGMYIDEzCCAw8CAQEwfTBpMQswCQYDVQQG
-# EwJVUzEXMBUGA1UEChMORGlnaUNlcnQsIEluYy4xQTA/BgNVBAMTOERpZ2lDZXJ0
-# IFRydXN0ZWQgRzQgVGltZVN0YW1waW5nIFJTQTQwOTYgU0hBMjU2IDIwMjUgQ0Ex
-# AhAKgO8YS43xBYLRxHanlXRoMA0GCWCGSAFlAwQCAQUAoGkwGAYJKoZIhvcNAQkD
-# MQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUxDxcNMjYwNzI3MDQwMjUzWjAvBgkq
-# hkiG9w0BCQQxIgQgLj6iLCgmEdc8RuVT1NCUdZCDCgOoVq61E2/LUhBKALEwDQYJ
-# KoZIhvcNAQEBBQAEggIAMyGp84BER+aKjkbubMECKdi7s/DaNuvvrLNnuyqU8XpD
-# hQzFxfEv0aJvSeQWhIIYyewoGQO1is6QmpS2Kfbp190UrbZvtX/4mjw6PpgXMLUU
-# QtiyN7qBVbU6itYr4GVpB4qcm2JrRRMXJtY/0V6xGaPH522fESGxANAN1UB7BULI
-# hUb6MKVsyRPo+GzgPRiAXuVbmgSQcxTT8GCUS1ONY4XviFawdd6ApVIaqQr0nRJ8
-# SkGuuIsAIGrL1H4pucB0xgDzvfH+qMWqWEbRLninuXTSXP+8mpVVwRYzBq3rIcpR
-# XDoEFdTxQEuug1ZeYS1loR1c/ynnMdful6xpzFbG9x5RIy970uz2dBtzLxBb0fMS
-# xvlO3TdawjUwm9yqy2htG8CdKJ21VoOIDI7axfWJAeWvP7iu70T41MVN6bjM0Ea8
-# JqVtcciUBrcVjaXGTo6ahjIeYSdfFPZePYuuo9V3VT0qvBxFTceDqpj4T1wn903K
-# OPZdppANVtsnsObZ2CecPzWcVYt1O2pZkr1A1ZPzwIyF9FKo1m11qLeA8p19gzO2
-# HCU2VDqAZlz3d0ZnMClk8W8fGRbcsFmwaXN+tKZpNamdYtMItVOPm64aBXY8bAr7
-# WrkppFsR/8n4Kmnk2DPyomWlRSLwvqnpzV2FvusvJTGzH2EDtIudGN2T5Yi/BcQ=
+# DjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCgRpEjL9BvRdOoP9hkbA7v
+# 63wSdorz1bC1Be8CaznsKzALBgcqhkjOPQIBBQAERzBFAiEAuXQ9lka+QeclfelO
+# Z9hgImbog+9kXrPslmb+1f9bdOMCICJCGtEv1sk6HBPO7EBMqrnwKJfqrLp6mVVh
+# 50a9Hfn5oYIDJjCCAyIGCSqGSIb3DQEJBjGCAxMwggMPAgEBMH0waTELMAkGA1UE
+# BhMCVVMxFzAVBgNVBAoTDkRpZ2lDZXJ0LCBJbmMuMUEwPwYDVQQDEzhEaWdpQ2Vy
+# dCBUcnVzdGVkIEc0IFRpbWVTdGFtcGluZyBSU0E0MDk2IFNIQTI1NiAyMDI1IENB
+# MQIQCoDvGEuN8QWC0cR2p5V0aDANBglghkgBZQMEAgEFAKBpMBgGCSqGSIb3DQEJ
+# AzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MDcyNzA0MDI1NlowLwYJ
+# KoZIhvcNAQkEMSIEIB1424gsz9uVljf3xm1lfH0KYwHsujOaqG+tuWfofhZoMA0G
+# CSqGSIb3DQEBAQUABIICAHu8H2v7pFzo/F9IQUBjwGwsgZGPzUwvZjSKEuyD3YT1
+# X6PiQkBG9q2njbE4WqRUVWc7eY9ozH8M+cY287Sj/PtlHeX+wX1EoYZF09kmGvEJ
+# fnqcP5oOtAg9tcUomm9D+ebVqmVL1xImct89D+bQzBTpbZKGvSWUHlyHeEufNQik
+# qehtOmS7IlR1nv+ZD91UszT2MiqePdB09jffEdsrITSa7dpNFNQdJ2iLGz/uhG3V
+# 0tDX7Q4NqI51jUcHbDcw5fnF+DqI4/FMgGuK595ge85xyUS8xKPZ4LBxt607UyjN
+# Mbf6heouHDZy4sL2atjic8bgpONYeVugnvQ48M91SGTOqrs36jAQ9PKU6sqYH1Xz
+# 59awRMF2UfBEfDl28tvaTNg1xvpKvqNH+oKNpxi47q48z6MflP++VatY/CO/CpYe
+# l85YpCEtcIq1zniwF3B7PipTnJP2PfxITGyrzErlgZQmlo0CqC2f0RXKZbMqJSDf
+# Z1w4xvU099s1tHSJ0F7suK1CC430LwAY2MeRh2CrDfRZNFwKAIxHCDKoWqKNwS+o
+# 2A4wWB98Sz2zA2CD5lXdZOcHVI/vWR5V7sJk+BUdRavtE7tWJuvmGCl7gUIkvTZf
+# x8fdlrpl/IDejC3n5nkqKVeDF5Xst1EIJTMbJ2isODUCATNZ7kGQdgUQM2CuEhba
 # SIG # End signature block
