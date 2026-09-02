@@ -1,10 +1,16 @@
 # ADCSTools
 
-[![PowerShell Gallery](https://img.shields.io/badge/PowerShell%20Gallery-ADCSTools-blue)](https://github.com/richardhicks/adcstools)
-[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
-[![Version](https://img.shields.io/badge/Version-3.0-brightgreen)](https://github.com/richardhicks/adcstools)
+[![PowerShell Gallery Version](https://img.shields.io/powershellgallery/v/ADCSTools?label=PowerShell%20Gallery)](https://www.powershellgallery.com/packages/ADCSTools)
+[![PowerShell Gallery Downloads](https://img.shields.io/powershellgallery/dt/ADCSTools?label=Downloads)](https://www.powershellgallery.com/packages/ADCSTools)
+[![License](https://img.shields.io/github/license/richardhicks/adcstools?label=License)](https://github.com/richardhicks/adcstools/blob/main/LICENSE)
 
 PowerShell module for performing administrative tasks on Microsoft Active Directory Certificate Services (AD CS) servers.
+
+## What's New in 3.1
+
+Version 3.1 adds a new function for organizations that publish CRLs to multiple file shares or serve them from load-balanced web servers:
+
+- **Consistent CRL timestamps** – The new `Update-CrlDateTimeStamp` function sets the last write time and creation time of published CRL files to the `ThisUpdate` value embedded in the CRL. Because IIS derives the `ETag` and `Last-Modified` HTTP headers from the file's last write time, identical CRLs served by different web servers would otherwise return different ETags and cause unnecessary cache misses. Publication folders are discovered automatically from the CA's `CRLPublicationURLs` configuration, or specified explicitly with `-Path`. The `-RegisterScheduledTask` parameter creates a scheduled task that runs the function each time the CA publishes a CRL (security event ID 4872) and once daily as a safety net, with a summary written to the Application event log on every run.
 
 ## What's New in 3.0
 
@@ -53,6 +59,7 @@ Import-Module -Name ADCSTools
 | [Move-CertificateServicesDatabase](#move-certificateservicesdatabase) | Move the CA server database and log files to another folder or volume |
 | [Remove-ExpiredCertificate](#remove-expiredcertificate) | Delete expired certificates from the CA server database |
 | [Revoke-ValidIssuedCertificate](#revoke-validissuedcertificate) | Revoke all valid issued certificates on a CA server |
+| [Update-CrlDateTimeStamp](#update-crldatetimestamp) | Set the timestamp of published CRL files to the CRL ThisUpdate value |
 
 The module also includes private helper functions (`Test-IsElevated` and `Test-CaPermission`) used internally to validate elevation and CA permissions. These are not exported.
 
@@ -298,6 +305,41 @@ Revoke-ValidIssuedCertificate -Reason CACompromise -IssueCrl
 
 # Simulate the revocation without performing it
 Revoke-ValidIssuedCertificate -WhatIf
+```
+
+### Update-CrlDateTimeStamp
+
+Set the file system timestamp of published certificate revocation list (CRL) files to the `ThisUpdate` value embedded in the CRL. When a CA publishes CRL files to multiple file shares, or when several load-balanced web servers serve the same CRL, the last write time of each copy differs slightly. IIS derives the `ETag` and `Last-Modified` HTTP headers from the file's last write time, so identical CRLs return different ETags. Setting every copy to the signed `ThisUpdate` value makes the timestamps identical regardless of which server wrote the file. The operation is idempotent and safe to run repeatedly. Supports `-WhatIf`.
+
+When `-Path` is omitted, publication folders are discovered from the `CRLPublicationURLs` registry value of the active CA. Only file system entries flagged for base or delta CRL publication are used. Each run writes a summary event to the Application event log using the source `Update-CrlDateTimeStamp`: event ID 1000 (Information) on success, 1001 (Warning) when a location was inaccessible or a file could not be updated, and 1002 (Error) when the run fails.
+
+> **Note:** The scheduled task is triggered by security event ID 4872, which is only logged when success auditing is enabled for the Certification Services subcategory (`auditpol /set /subcategory:"Certification Services" /success:enable`) and the CA audit filter includes CRL publishing (`certutil -setreg CA\AuditFilter 127` followed by a restart of the CertSvc service). The task imports the module from its installation path at registration time, so run `-RegisterScheduledTask` again after the module is updated or moved. Install the module in the `AllUsers` scope so the task, which runs as SYSTEM, can load it.
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `-Path` | String[] | No | One or more folders or CRL files to process. When omitted, publication locations are discovered from the local CA configuration |
+| `-DelaySeconds` | Int | No | Seconds to wait before processing files, allowing the CA to finish writing when triggered by an event. Default: `0` |
+| `-RetryCount` | Int | No | Number of times to retry a file that is locked or in use. Default: `3` |
+| `-RetryDelaySeconds` | Int | No | Seconds to wait between retries. Default: `5` |
+| `-RegisterScheduledTask` | Switch | No | Register a scheduled task running as SYSTEM that runs the function on security event ID 4872 and once daily. Also registers the event log source |
+| `-TaskName` | String | No | Name of the scheduled task to register. Default: `Update-CrlDateTimeStamp` |
+
+#### Examples
+
+```powershell
+# Discover CRL publication folders from the CA configuration and update timestamps
+Update-CrlDateTimeStamp
+
+# Process CRL files in specific folders without reading the CA configuration
+Update-CrlDateTimeStamp -Path '\\fs1.corp.example.net\pki\', '\\fs2.corp.example.net\pki\'
+
+# Report which files would be updated without making changes
+Update-CrlDateTimeStamp -WhatIf
+
+# Register a scheduled task that runs whenever the CA publishes a CRL
+Update-CrlDateTimeStamp -RegisterScheduledTask
 ```
 
 ## Requirements
