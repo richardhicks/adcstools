@@ -363,4 +363,4 @@ This project is licensed under the [MIT License](https://github.com/richardhicks
 
 ## Copyright
 
-&copy; 2024-2026 Richard M. Hicks Consulting, Inc. All rights reserved.
+&copy; 2024-2026 Richard M. Hicks Consulting, Inc.
